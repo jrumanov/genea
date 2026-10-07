@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+.genea/
+tests/private/*
+!tests/private/README.md

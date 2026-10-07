@@ -282,3 +282,47 @@ Global option: `--kb <path|name>`.
 2. `genea --kb <path> index` completes and prints a summary.
 3. `genea ask "who were <person>'s grandparents?"` answers correctly with GEDCOM citations.
 4. A proposed image caption change can be listed, shown, applied and undone.
+
+## 10. Known issues and follow-ups
+
+### Keyword changes drop embedded IPTC-only keywords from the index
+
+Found in the final whole-branch review of the v1 implementation. Not fixed in v1.
+
+**Problem.** The XMP sidecar is authoritative per field: when it carries `XMP-dc:Subject`,
+that list replaces the embedded keywords (the union of the image's `XMP-dc:Subject` and
+`IPTC:Keywords`) in the index. A new sidecar is seeded only with
+`-tagsfromfile … -xmp:all`, which does not copy IPTC keywords. As a result, `add_keywords`
+and `remove_keywords` on a photo whose keywords are IPTC-only (common for older scanned or
+tagged photos) leave the index with only the sidecar's list:
+
+- IPTC `[rodina, svatba]`, then `add_keywords [Brno]`: the index shows `['Brno']`.
+- IPTC `[rodina, svatba]` plus XMP `[rodina]`, then `add_keywords [Brno]`: `svatba` is lost.
+- IPTC-only image with an existing sidecar (for example after a title change), then
+  `remove_keywords [rodina]`: the index shows `[]`, because the empty placeholder entry
+  that `remove_keywords` leaves hides the embedded keywords too.
+
+`genea changes show` reads only the sidecar's `XMP-dc:Subject`, so its before/after preview
+shows `before: []` and hides the loss.
+
+**Impact.** The loss is limited to the index view and the sidecar's keyword list. Originals
+and embedded metadata are never modified, and the index can be rebuilt, so no user data is
+destroyed. The behaviour surprises the user after they approve a keyword change.
+
+**Required fix.**
+- Before applying `add_keywords` or `remove_keywords`, seed the sidecar's `XMP-dc:Subject`
+  from the effective (merged) keyword list of the image, then add or remove the requested
+  keywords.
+- Compute the `changes show` "before" value the same way, from the merged list rather than
+  the sidecar alone, so the preview matches what the index will show.
+- Add an ExifTool test using an IPTC-only image (add, remove, and add-after-remove) that
+  checks both the index contents and the preview.
+
+**Related, lower priority.**
+- `remove_keywords` on an IPTC-only image with no sidecar fails with ExifTool "Nothing to
+  write" and is rolled back. The same seeding fix resolves it.
+- Clearing a date (`XMP-photoshop:DateCreated: ""`) deletes the sidecar date, so the embedded
+  `ExifIFD`/IPTC date shows through again, while the preview shows the date going to empty.
+  Reject an empty date in validation or document it.
+- A payload list that mixes empty and non-empty items (for example `["A", ""]`) deletes the
+  tag instead of setting it. Filter empty items before building the ExifTool arguments.
