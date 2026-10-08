@@ -112,12 +112,15 @@ CREATE INDEX links_source ON links (source_kind, source_id);
 """
 
 
+BUSY_TIMEOUT = 5.0  # seconds a write waits for another program's write to the index
+
+
 class SchemaMismatch(RuntimeError):
     """The index was built with another schema or embedding model."""
 
 
 def connect(path: Path, embed_model: str, embed_dim: int) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=BUSY_TIMEOUT)
     conn.row_factory = sqlite3.Row
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)

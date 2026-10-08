@@ -40,6 +40,14 @@ class IndexInUse(RuntimeError):
                          "Close it and run `genea index --rebuild` again.")
 
 
+class IndexDbLocked(RuntimeError):
+    """SQLite stayed locked: another program is writing the index without taking the index lock."""
+
+    def __init__(self) -> None:
+        super().__init__("The index is being written by another program (possibly a `genea index` started "
+                         "before this version). Wait for it to finish or stop it, then run `genea index` again.")
+
+
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
