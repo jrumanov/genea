@@ -89,8 +89,10 @@ session.
 
 ## Model choice
 
-The live evaluation (`uv run pytest -m live`, 15 questions) has not been run yet: no pass rate is
-recorded. Run it against your model and compare with `GENEA_LIVE_MODEL=ollama:qwen3:8b`.
+The live evaluation (`uv run pytest -m live`, 15 questions) passed 14 of 15 with `qwen3:8b` on a
+CPU-only machine (about 4 minutes per question). The miss was a Czech declension case: for "Kdo byli
+sourozenci Karla Nováka narozeného 1871?" the model searched for "Karl Novák" instead of "Karel
+Novák" and found nothing. Compare other models with `GENEA_LIVE_MODEL=ollama:<name>`.
 
 ## Limitations (v1)
 
@@ -98,8 +100,8 @@ No OCR (scanned PDFs are listed as `needs_ocr` by `genea status`), no image-cont
 no direct GEDCOM writing. Name matching does not handle Czech declension ("Annou Svobodovou"),
 so full-text and semantic search do that work.
 
-Known limitations: `ask` and `chat` are tested against PydanticAI's test models and a local fake
-OpenAI-compatible HTTP server, not yet against a real Ollama model (see Model choice above).
+The model may not normalize inflected Czech names to the nominative before searching (see Model
+choice above).
 
 ## Development
 
