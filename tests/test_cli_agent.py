@@ -37,3 +37,61 @@ def test_chat(sample_root, monkeypatch):
     result = runner.invoke(app, ["--kb", str(sample_root), "chat"], input="Ahoj\nexit\n")
     assert result.exit_code == 0, result.output
     assert "Josef Novák" in result.output
+
+
+def _prompts(sample_root):
+    return (sample_root / ".genea" / "prompts.md").read_text(encoding="utf-8")
+
+
+def test_ask_logs_the_prompt(sample_root, monkeypatch):
+    _setup(sample_root, monkeypatch)
+    result = runner.invoke(app, ["--kb", str(sample_root), "ask", "Kdo je Josef?"])
+    assert result.exit_code == 0, result.output
+    text = _prompts(sample_root)
+    assert text.count("\n## ") + text.startswith("## ") == 1
+    assert "**Q:** Kdo je Josef?" in text
+    assert "> Josef Novák [tree.ged:L7]" in text
+    assert "followup: false" in text
+
+
+def test_chat_logs_each_turn_and_marks_followups(sample_root, monkeypatch):
+    _setup(sample_root, monkeypatch)
+    result = runner.invoke(app, ["--kb", str(sample_root), "chat"], input="Kdo je Josef?\nA kdy se narodil?\nexit\n")
+    assert result.exit_code == 0, result.output
+    text = _prompts(sample_root)
+    assert text.count("followup: false") == 1
+    assert text.count("followup: true") == 1
+    assert text.index("Kdo je Josef?") < text.index("A kdy se narodil?")
+    assert text.count("session: ") == 2  # same session id on both turns
+    session_ids = {line for line in text.splitlines() if line.startswith("session: ")}
+    assert len(session_ids) == 1
+
+
+def test_log_prompts_can_be_turned_off(sample_root, monkeypatch):
+    _setup(sample_root, monkeypatch, "log_prompts = false\n")
+    result = runner.invoke(app, ["--kb", str(sample_root), "ask", "Kdo je Josef?"])
+    assert result.exit_code == 0, result.output
+    assert not (sample_root / ".genea" / "prompts.md").exists()
+
+
+def test_failed_question_is_logged(sample_root, monkeypatch):
+    _setup(sample_root, monkeypatch)
+
+    def boom(messages, info):
+        raise RuntimeError("model exploded")
+
+    monkeypatch.setattr("genea.cli.agentcmds.build_model", lambda settings: FunctionModel(boom))
+    result = runner.invoke(app, ["--kb", str(sample_root), "ask", "Kdo je Josef?"])
+    assert result.exit_code == 1
+    text = _prompts(sample_root)
+    assert "failed: true" in text
+    assert "model exploded" in text
+
+
+def test_unwritable_prompt_log_does_not_break_the_answer(sample_root, monkeypatch):
+    _setup(sample_root, monkeypatch)
+    (sample_root / ".genea" / "prompts.md").mkdir()  # a folder where the file should be
+    result = runner.invoke(app, ["--kb", str(sample_root), "ask", "Kdo je Josef?"])
+    assert result.exit_code == 0, result.output
+    assert "Josef Novák" in result.output
+    assert "prompt log" in result.output.lower()
