@@ -5,6 +5,7 @@ Run:  uv run pytest -m live            (uses the model from ~/.genea/config.toml
 Needs Ollama running with the chat model and bge-m3 pulled.
 """
 
+import asyncio
 import os
 from dataclasses import replace
 
@@ -60,14 +61,17 @@ def live(tmp_path_factory):
     embedder = make_embedder(settings)
     index_kb(kb, embedder)
     tools = open_tools(kb, embedder)
-    yield tools, build_agent(build_model(settings))
+    # One event loop for all questions: the shared agent's HTTP client keeps keep-alive connections
+    # bound to the loop that opened them (see `ask`).
+    with asyncio.Runner() as runner:
+        yield tools, build_agent(build_model(settings)), runner
     tools.conn.close()
 
 
 @pytest.mark.parametrize("question, expected", QUESTIONS)
 def test_live_question(live, question, expected):
-    tools, agent = live
-    answer = ask(agent, tools, question)
+    tools, agent, runner = live
+    answer = ask(agent, tools, question, runner=runner)
     text = normalize(answer.text)
     for word in expected:
         assert normalize(word) in text, answer.text
