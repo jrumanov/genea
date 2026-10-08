@@ -32,7 +32,7 @@ still go through the `genea` CLI.
 
 ```bash
 uv sync --extra mcp
-genea --kb <kb> index        # the knowledge base must be indexed first
+genea --kb <kb> index        # Claude can connect before this finishes, see below
 ```
 
 Claude Code:
@@ -57,6 +57,12 @@ Claude Desktop (`claude_desktop_config.json`; use absolute paths, and double bac
 Ollama is optional here: without it, document search falls back to keywords. Tool results, which contain
 your family-tree data, are sent to the Claude client you connect (hide the startup note with
 `privacy_notice = false`).
+
+Claude can connect before or during indexing. Until the knowledge base is indexed, the tools reply that it
+is not indexed or is being built (with progress and an ETA). While `genea index` runs, or after a run that
+did not finish, results carry a note that they may be incomplete. Ask Claude for the `index_status`, or
+run `genea status`, to see the progress. On Windows, `genea index --rebuild` cannot delete an index that
+Claude has open: close the Claude client first.
 
 ## Quick start
 

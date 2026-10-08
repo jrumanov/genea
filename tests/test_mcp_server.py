@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sqlite3
 from dataclasses import replace
 
 import pytest
@@ -11,12 +12,17 @@ from pydantic_ai.models.test import TestModel  # noqa: E402
 
 from genea.agent.core import build_agent  # noqa: E402
 from genea.index.embed import EmbeddingError  # noqa: E402
-from genea.mcp_server import build_server  # noqa: E402
+from genea.index.embed import FakeEmbedder  # noqa: E402
+from genea.index.indexer import index_kb  # noqa: E402
+from genea.index.progress import IndexLock, IndexProgress, now_iso, write_progress  # noqa: E402
+from genea.mcp_server import IndexGate, build_server  # noqa: E402
 from genea.tool_runner import run_tool  # noqa: E402
 from genea.tools import conflicts, people, search  # noqa: E402
+from genea.tools.base import open_tools  # noqa: E402
 
 READ_ONLY = {"find_person", "get_person", "relatives", "timeline", "search_documents",
              "read_document", "find_images", "find_conflicts"}
+MCP_ONLY = {"index_status"}
 JAN = "tree.ged#@I12@"
 
 # (tool name, MCP arguments, tools.* function, positional args the wrapper must pass to it)
@@ -39,7 +45,7 @@ def _call(server, tool, arguments):
 
 def test_registers_exactly_the_read_only_tools(tools):
     names = {t.name for t in asyncio.run(build_server(tools).list_tools())}
-    assert names == READ_ONLY
+    assert names == READ_ONLY | MCP_ONLY
     assert not names & {"write_note", "propose_change"}
 
 
@@ -74,3 +80,68 @@ def test_search_degrades_without_embeddings(tools):
     server = build_server(replace(tools, embedder=_Down()))
     body = json.loads(_call(server, "search_documents", {"query": "Josef"}).content[0].text)
     assert "full-text" in body["note"]
+
+
+def _gate(kb, embedder=None):
+    return IndexGate(kb, lambda: open_tools(kb, embedder or FakeEmbedder()))
+
+
+def _text(result):
+    return result.content[0].text
+
+
+def _building(kb, done=2, total=6):
+    write_progress(kb, IndexProgress(pid=1, started_at=now_iso(), phase="indexing", phase_started_at=now_iso(),
+                                     updated_at=now_iso(), done=done, total=total, current="docs/kronika.txt"))
+
+
+def test_server_starts_without_an_index_and_explains(kb):
+    server = build_server(_gate(kb))
+    assert {t.name for t in asyncio.run(server.list_tools())} == READ_ONLY | MCP_ONLY
+    with pytest.raises(McpToolError, match="not indexed yet"):
+        _call(server, "find_person", {"name": "Jan"})
+    assert "not indexed yet" in _text(_call(server, "index_status", {}))
+    assert not kb.index_path.exists()  # asking never creates an empty index
+
+
+def test_first_index_in_progress_reports_progress(kb):
+    server = build_server(_gate(kb))
+    _building(kb)
+    with IndexLock(kb):
+        with pytest.raises(McpToolError, match=r"being built: 2 / 6 files"):
+            _call(server, "get_person", {"person_id": JAN})
+        assert "2 / 6 files" in _text(_call(server, "index_status", {}))
+
+
+def test_partial_index_results_carry_a_note(kb):
+    index_kb(kb, FakeEmbedder())
+    server = build_server(_gate(kb))
+    _building(kb, done=3)
+    with IndexLock(kb):
+        text = _text(_call(server, "find_person", {"name": "Jan Novák"}))
+        assert "Jan Novák" in text
+        assert "still being built (3 / 6 files" in text and "may be incomplete" in text
+    assert "still being built" not in _text(_call(server, "find_person", {"name": "Jan Novák"}))
+
+
+def test_interrupted_index_results_carry_a_note(kb):
+    index_kb(kb, FakeEmbedder())
+    conn = sqlite3.connect(kb.index_path)
+    conn.execute("UPDATE meta SET value = 'running' WHERE key = 'index_state'")
+    conn.commit()
+    conn.close()
+    text = _text(_call(build_server(_gate(kb)), "find_person", {"name": "Jan Novák"}))
+    assert "did not finish" in text
+
+
+def test_index_status_when_ready(tools):
+    text = _text(_call(build_server(tools), "index_status", {}))
+    assert "complete" in text
+    assert "People: 20" in text
+
+
+def test_schema_mismatch_is_a_tool_error(kb):
+    index_kb(kb, FakeEmbedder(64))
+    server = build_server(_gate(kb, FakeEmbedder(32)))
+    with pytest.raises(McpToolError, match="--rebuild"):
+        _call(server, "find_person", {"name": "Jan"})

@@ -145,5 +145,20 @@ def connect(path: Path, embed_model: str, embed_dim: int) -> sqlite3.Connection:
     return conn
 
 
+def connect_readonly(path: Path) -> sqlite3.Connection:
+    """Plain read-only connection (no sqlite-vec, no schema check) that never creates the file.
+    `as_uri()` escapes spaces and other characters in the path."""
+    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def set_index_state(conn: sqlite3.Connection, state: str) -> None:
+    """'running' while `genea index` works, 'complete' when it finished (see index.progress)."""
+    with conn:
+        conn.execute("INSERT INTO meta (key, value) VALUES ('index_state', ?) "
+                     "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (state,))
+
+
 def open_index(kb: KnowledgeBase, embedder: Embedder) -> sqlite3.Connection:
     return connect(kb.index_path, embedder.model, embedder.dim)

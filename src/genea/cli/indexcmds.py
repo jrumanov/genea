@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
-import sqlite3
-
 import typer
 from rich.markup import escape
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 from rich.table import Table
 
 from genea.cli import common
 from genea.cli.app import app
 from genea.index.db import SchemaMismatch
 from genea.index.indexer import index_kb
+from genea.index.progress import IndexBusy, IndexInUse, IndexProgress
+from genea.index.status import index_summary
+
+CURRENT_WIDTH = 50  # characters of the current file's path shown next to the bar
+
+
+def _short(rel: str | None) -> str:
+    rel = rel or ""
+    return rel if len(rel) <= CURRENT_WIDTH else "…" + rel[-(CURRENT_WIDTH - 1):]
 
 
 @app.command()
@@ -21,12 +29,25 @@ def index(
 ) -> None:
     """Index new and changed files of the knowledge base."""
     kb = common.open_kb(ctx)
-    try:
-        report = index_kb(kb, common.get_embedder(kb), rebuild=rebuild,
-                          on_file=lambda rel: common.console.print(f"[dim]indexing {escape(rel)}[/dim]"))
-    except SchemaMismatch as exc:
-        common.console.print(f"[red]{escape(str(exc))}[/red]")
-        raise typer.Exit(1) from exc
+    columns = (SpinnerColumn(), TextColumn("{task.description}"), BarColumn(), MofNCompleteColumn(),
+               TimeRemainingColumn())
+    with Progress(*columns, console=common.console, transient=True) as bar:
+        task = bar.add_task("scanning", total=None)
+
+        def show(p: IndexProgress) -> None:
+            if p.phase == "scanning":
+                bar.update(task, description=f"scanning ({p.done} files)")
+            elif p.phase == "indexing":
+                bar.update(task, total=p.total, completed=p.done, description=escape(_short(p.current)))
+            else:
+                bar.update(task, total=None, completed=0, description="linking people to documents and photos")
+
+        try:
+            report = index_kb(kb, common.get_embedder(kb), rebuild=rebuild, on_progress=show)
+        except (SchemaMismatch, IndexBusy, IndexInUse) as exc:
+            bar.stop()
+            common.console.print(f"[red]{escape(str(exc))}[/red]")
+            raise typer.Exit(1) from exc
     common.console.print(
         f"ok {report.ok} · needs OCR {report.needs_ocr} · errors {report.errors} · "
         f"unchanged {report.skipped} · removed {report.removed}"
@@ -37,28 +58,20 @@ def index(
 
 @app.command()
 def status(ctx: typer.Context) -> None:
-    """Show what is indexed and which files had problems."""
+    """Show what is indexed, whether indexing is running, and which files had problems."""
     kb = common.open_kb(ctx)
-    if not kb.index_path.exists():
+    summary = index_summary(kb)
+    if summary.state == "missing":
         common.console.print("[yellow]Not indexed yet. Run `genea index`.[/yellow]")
         raise typer.Exit(1)
-    conn = sqlite3.connect(kb.index_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        counts = conn.execute(
-            "SELECT kind, status, COUNT(*) AS n FROM files GROUP BY kind, status ORDER BY kind, status"
-        ).fetchall()
-        problems = conn.execute(
-            "SELECT path, status, error_msg FROM files WHERE status != 'ok' OR error_msg IS NOT NULL ORDER BY path"
-        ).fetchall()
-        people = conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
-    finally:
-        conn.close()
+    if summary.state in ("building", "interrupted"):
+        common.console.print(f"[yellow]{escape(summary.headline())}[/yellow]")
+    if summary.counts is None:
+        return
     table = Table("kind", "status", "files")
-    for row in counts:
-        table.add_row(row["kind"], row["status"], str(row["n"]))
+    for kind, file_status, n in summary.counts:
+        table.add_row(kind, file_status, str(n))
     common.console.print(table)
-    common.console.print(f"{people} people in the family-tree index")
-    for row in problems:
-        common.console.print(f"[yellow]{escape(row['path'])}[/yellow] ({row['status']}): "
-                             f"{escape(row['error_msg'] or '')}")
+    common.console.print(f"{summary.people} people in the family-tree index")
+    for path, file_status, message in summary.problems:
+        common.console.print(f"[yellow]{escape(path)}[/yellow] ({file_status}): {escape(message)}")
