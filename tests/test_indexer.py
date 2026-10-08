@@ -1,8 +1,10 @@
+import os
+
 import pytest
 
 from genea.index.db import SchemaMismatch, open_index
 from genea.index.embed import FakeEmbedder
-from genea.index.indexer import index_kb, name_forms, scan_files
+from genea.index.indexer import index_kb, name_forms, scan_files, source_mtime
 
 
 def _query(kb, sql, params=()):
@@ -30,6 +32,40 @@ def test_second_run_skips_unchanged(kb):
     index_kb(kb, FakeEmbedder())
     report = index_kb(kb, FakeEmbedder())
     assert (report.ok, report.skipped) == (0, 6)
+
+
+def test_unchanged_files_are_not_read_again(kb, monkeypatch):
+    index_kb(kb, FakeEmbedder())
+
+    def fail(*args):
+        raise AssertionError("an unchanged file was hashed")
+    monkeypatch.setattr("genea.index.indexer.file_hash", fail)
+    assert index_kb(kb, FakeEmbedder()).skipped == 6
+
+
+def test_touched_file_is_hashed_once_and_not_reindexed(kb, monkeypatch):
+    index_kb(kb, FakeEmbedder())
+    path = kb.root / "docs" / "kronika.txt"
+    stat = path.stat()
+    os.utime(path, (stat.st_atime, stat.st_mtime + 100))  # new mtime, same content
+    report = index_kb(kb, FakeEmbedder())
+    assert (report.ok, report.skipped) == (0, 6)
+
+    def fail(*args):
+        raise AssertionError("the new mtime was not remembered")
+    monkeypatch.setattr("genea.index.indexer.file_hash", fail)
+    assert index_kb(kb, FakeEmbedder()).skipped == 6
+
+
+def test_source_mtime_covers_the_image_sidecar(tmp_path):
+    image, sidecar = tmp_path / "a.jpg", tmp_path / "a.xmp"
+    image.write_bytes(b"i")
+    os.utime(image, (1000, 1000))
+    assert source_mtime(image, "image") == 1000
+    sidecar.write_bytes(b"s")
+    os.utime(sidecar, (2000, 2000))
+    assert source_mtime(image, "image") == 2000
+    assert source_mtime(image, "doc") == 1000  # only images have sidecars
 
 
 def test_changed_and_removed_files(kb):
@@ -169,6 +205,9 @@ def test_unreadable_file_on_rerun_replaces_its_old_row(kb, monkeypatch):
     from genea.index import indexer
 
     index_kb(kb, FakeEmbedder())
+    path = kb.root / "docs" / "kronika.txt"
+    stat = path.stat()
+    os.utime(path, (stat.st_atime, stat.st_mtime + 100))  # an unchanged mtime would skip the read
     monkeypatch.setattr(indexer, "file_hash", _unreadable("docs/kronika.txt"))
     report = index_kb(kb, FakeEmbedder())
     assert (report.errors, report.skipped) == (1, 5)
@@ -235,3 +274,44 @@ def test_scan_skips_file_symlink_escaping_the_root(kb, tmp_path):
     outside.write_text("Mimo znalostní bázi.", encoding="utf-8")
     _link_outside(kb.root / "docs" / "secret.txt", outside)
     assert "docs/secret.txt" not in [kb.rel(p) for p, _ in scan_files(kb)]
+
+
+def _image_rows(kb):
+    return [tuple(r) for r in _query(kb, "SELECT f.path, i.title, i.keywords, i.persons_shown, i.place, i.date_taken "
+                                         "FROM images i JOIN files f ON f.id = i.file_id ORDER BY f.path")]
+
+
+@pytest.mark.exiftool
+def test_images_are_read_in_one_exiftool_run(kb_with_images, monkeypatch):
+    from genea.ingest import images
+
+    calls = []
+    real = images.read_metadata
+
+    def counting(paths, exe="exiftool"):
+        calls.append(len(paths))
+        return real(paths, exe)
+    monkeypatch.setattr(images, "read_metadata", counting)
+    report = index_kb(kb_with_images, FakeEmbedder())
+    assert report.errors == 0
+    assert calls == [4]  # three images and one sidecar, in a single run
+    assert len(_image_rows(kb_with_images)) == 3
+
+
+@pytest.mark.exiftool
+def test_failed_batch_falls_back_to_one_run_per_image(kb_with_images, monkeypatch):
+    from genea.exiftool import ExifToolError
+    from genea.ingest import images
+
+    batched = index_kb(kb_with_images, FakeEmbedder(), rebuild=True)
+    expected = _image_rows(kb_with_images)
+    real = images.read_metadata
+
+    def flaky(paths, exe="exiftool"):
+        if len(paths) > 2:
+            raise ExifToolError("one bad file spoils the batch")
+        return real(paths, exe)
+    monkeypatch.setattr(images, "read_metadata", flaky)
+    report = index_kb(kb_with_images, FakeEmbedder(), rebuild=True)
+    assert (report.ok, report.errors) == (batched.ok, 0)
+    assert _image_rows(kb_with_images) == expected
