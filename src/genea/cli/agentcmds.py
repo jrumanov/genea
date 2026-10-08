@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
+import time
 
 import typer
 from rich.markdown import Markdown
 from rich.markup import escape
 
+from genea.agent import promptlog
 from genea.agent.core import AgentFailed, Answer, build_agent
 from genea.agent.core import ask as ask_agent
 from genea.agent.model import build_model, is_local
@@ -35,12 +38,35 @@ def _print(answer: Answer, show_tools: bool) -> None:
     common.console.print(Markdown(answer.text))
 
 
+def _ask_logged(agent, tools, question: str, session: str, turn: int, history=None, runner=None) -> Answer:
+    """Run one question and append it to the prompt log, whether it succeeded or not."""
+    started = time.perf_counter()
+    answer, error = None, None
+    try:
+        answer = ask_agent(agent, tools, question, history, runner=runner)
+        return answer
+    except AgentFailed as exc:
+        error = str(exc)
+        raise
+    except KeyboardInterrupt:
+        error = "interrupted"
+        raise
+    finally:
+        try:
+            promptlog.record(tools.kb, session=session, turn=turn, question=question,
+                             answer=answer.text if answer else None, error=error,
+                             tool_calls=[name for name, _ in answer.tool_calls] if answer else (),
+                             duration_s=time.perf_counter() - started)
+        except OSError as exc:
+            common.console.print(f"[dim]Could not write the prompt log: {escape(str(exc))}[/dim]")
+
+
 @app.command()
 def ask(ctx: typer.Context, question: str, show_tools: bool = SHOW_TOOLS) -> None:
     """Ask one question about the knowledge base."""
     tools, agent = _session(ctx)
     try:
-        answer = ask_agent(agent, tools, question)
+        answer = _ask_logged(agent, tools, question, secrets.token_hex(3), 1)
     except AgentFailed as exc:
         common.console.print(f"[red]{escape(str(exc))}[/red]")
         raise typer.Exit(1) from exc
@@ -54,6 +80,7 @@ def chat(ctx: typer.Context, show_tools: bool = SHOW_TOOLS) -> None:
     """Interactive conversation with the agent (type 'exit' to quit)."""
     tools, agent = _session(ctx)
     history = None
+    session, turn = secrets.token_hex(3), 0
     runner = asyncio.Runner()  # one event loop for the whole session (see agent.core.ask)
     common.console.print("Ask about the family history; type 'exit' to quit.")
     try:
@@ -66,8 +93,9 @@ def chat(ctx: typer.Context, show_tools: bool = SHOW_TOOLS) -> None:
                 break
             if not question:
                 continue
+            turn += 1
             try:
-                answer = ask_agent(agent, tools, question, history, runner=runner)
+                answer = _ask_logged(agent, tools, question, session, turn, history, runner)
             except AgentFailed as exc:
                 common.console.print(f"[red]{escape(str(exc))}[/red]")
                 continue

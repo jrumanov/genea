@@ -120,6 +120,7 @@ changes to `.genea/changes/pending/`. Review them with `genea changes show <id>`
 | `max_tool_calls` | `15` | Tool calls allowed per question |
 | `tool_output_chars` | `12000` | Truncation limit for each tool result |
 | `privacy_notice` | `true` | Warn when a cloud model will receive your data |
+| `log_prompts` | `true` | Append every `ask`/`chat` question and answer to `.genea/prompts.md` (fill in `verdict`/`note` by hand to mark good and bad answers) |
 | `exiftool` | `exiftool` | Path to the ExifTool binary |
 
 ## Privacy

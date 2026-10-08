@@ -17,6 +17,7 @@ class Settings:
     max_tool_calls: int = 15
     tool_output_chars: int = 12000
     privacy_notice: bool = True
+    log_prompts: bool = True
     gedcom_direct_write: bool = False
     exclude: tuple[str, ...] = ()
     exiftool: str = "exiftool"
