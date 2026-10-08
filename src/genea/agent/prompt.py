@@ -28,5 +28,10 @@ _TAIL = """\
 5. Answer in the language of the user's question. Be concise.
 """
 
+_MCP_RULE_6 = """\
+6. If a tool result says the index is missing, still being built or incomplete, tell the user, and do
+   not treat missing results as evidence that something does not exist. index_status shows progress.
+"""
+
 SYSTEM_PROMPT = _HEAD + _AGENT_RULE_4 + _TAIL
-MCP_INSTRUCTIONS = _HEAD + _MCP_RULE_4 + _TAIL
+MCP_INSTRUCTIONS = _HEAD + _MCP_RULE_4 + _TAIL + _MCP_RULE_6

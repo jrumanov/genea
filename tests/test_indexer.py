@@ -1,10 +1,12 @@
 import os
+from pathlib import Path
 
 import pytest
 
 from genea.index.db import SchemaMismatch, open_index
 from genea.index.embed import FakeEmbedder
 from genea.index.indexer import index_kb, name_forms, scan_files, source_mtime
+from genea.index.progress import IndexBusy, IndexInUse, IndexLock, index_state, is_index_running, read_progress
 
 
 def _query(kb, sql, params=()):
@@ -315,3 +317,64 @@ def test_failed_batch_falls_back_to_one_run_per_image(kb_with_images, monkeypatc
     report = index_kb(kb_with_images, FakeEmbedder(), rebuild=True)
     assert (report.ok, report.errors) == (batched.ok, 0)
     assert _image_rows(kb_with_images) == expected
+
+
+def test_progress_phases_and_final_state(kb):
+    seen = []
+
+    def record(progress):
+        on_disk = read_progress(kb)  # other processes see the same phase
+        seen.append((progress.phase, progress.done, progress.total, on_disk and on_disk.phase))
+
+    index_kb(kb, FakeEmbedder(), on_progress=record)
+    phases = [phase for phase, *_ in seen]
+    assert phases[0] == "scanning" and phases[-1] == "linking"
+    assert phases.index("indexing") < phases.index("linking")
+    indexing = [(done, total) for phase, done, total, _ in seen if phase == "indexing"]
+    assert indexing[0] == (0, 6) and indexing[-1] == (5, 6)  # reported before each of the 6 files
+    assert all(phase == disk for phase, _, _, disk in seen if phase != "scanning")
+    assert read_progress(kb) is None
+    assert index_state(kb) == "ready"
+    assert _query(kb, "SELECT value FROM meta WHERE key = 'index_state'")[0][0] == "complete"
+
+
+def test_crashed_run_is_interrupted_and_releases_the_lock(kb, monkeypatch):
+    def boom(conn):
+        raise RuntimeError("crash")
+
+    monkeypatch.setattr("genea.index.indexer.rebuild_links", boom)
+    with pytest.raises(RuntimeError):
+        index_kb(kb, FakeEmbedder())
+    assert index_state(kb) == "interrupted"
+    assert read_progress(kb) is None
+    monkeypatch.undo()
+    index_kb(kb, FakeEmbedder())
+    assert index_state(kb) == "ready"
+
+
+def test_second_run_while_locked_is_refused(kb):
+    with IndexLock(kb):
+        with pytest.raises(IndexBusy):
+            index_kb(kb, FakeEmbedder())
+
+
+def test_schema_mismatch_releases_the_lock(kb):
+    index_kb(kb, FakeEmbedder(64))
+    with pytest.raises(SchemaMismatch):
+        index_kb(kb, FakeEmbedder(32))
+    assert is_index_running(kb) is False
+
+
+def test_rebuild_of_an_open_index_explains_why(kb, monkeypatch):
+    index_kb(kb, FakeEmbedder())
+    real_unlink = Path.unlink
+
+    def locked(self, *args, **kwargs):
+        if self == kb.index_path:
+            raise PermissionError(32, "The process cannot access the file")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    with pytest.raises(IndexInUse, match="genea mcp"):
+        index_kb(kb, FakeEmbedder(), rebuild=True)
+    assert is_index_running(kb) is False

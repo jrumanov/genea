@@ -1,7 +1,11 @@
+import sqlite3
+
 from typer.testing import CliRunner
 
 from genea.cli.main import app
 from genea.index.embed import FakeEmbedder
+from genea.index.progress import IndexLock, IndexProgress, now_iso, write_progress
+from genea.kb import KnowledgeBase
 
 runner = CliRunner()
 
@@ -29,3 +33,38 @@ def test_index_then_status(sample_root, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "docs/sken.pdf" in result.output
     assert "20 people" in result.output
+
+
+def test_status_while_first_index_runs(sample_root, monkeypatch):
+    _prepare(sample_root, monkeypatch)
+    kb = KnowledgeBase.open(str(sample_root))
+    write_progress(kb, IndexProgress(pid=1, started_at=now_iso(), phase="indexing", phase_started_at=now_iso(),
+                                     updated_at=now_iso(), done=2, total=6, current="docs/kronika.txt"))
+    with IndexLock(kb):
+        result = runner.invoke(app, ["--kb", str(sample_root), "status"])
+    assert result.exit_code == 0, result.output
+    assert "Indexing in progress" in result.output
+    assert "2 / 6 files" in result.output
+
+
+def test_status_after_interrupted_run(sample_root, monkeypatch):
+    _prepare(sample_root, monkeypatch)
+    assert runner.invoke(app, ["--kb", str(sample_root), "index"]).exit_code == 0
+    kb = KnowledgeBase.open(str(sample_root))
+    conn = sqlite3.connect(kb.index_path)
+    conn.execute("UPDATE meta SET value = 'running' WHERE key = 'index_state'")
+    conn.commit()
+    conn.close()
+    result = runner.invoke(app, ["--kb", str(sample_root), "status"])
+    assert result.exit_code == 0, result.output
+    assert "did not finish" in result.output
+    assert "20 people" in result.output
+
+
+def test_index_refuses_a_second_run(sample_root, monkeypatch):
+    _prepare(sample_root, monkeypatch)
+    monkeypatch.setattr("genea.index.indexer.LOCK_WAIT", 0.0)
+    with IndexLock(KnowledgeBase.open(str(sample_root))):
+        result = runner.invoke(app, ["--kb", str(sample_root), "index"])
+    assert result.exit_code == 1
+    assert "already running" in result.output

@@ -5,7 +5,9 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import os
 import sqlite3
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -14,8 +16,9 @@ from pathlib import Path
 import sqlite_vec
 
 from genea.exiftool import ExifToolError
-from genea.index.db import open_index
+from genea.index.db import open_index, set_index_state
 from genea.index.embed import Embedder
+from genea.index.progress import IndexInUse, IndexLock, IndexProgress, clear_progress, now_iso, write_progress
 from genea.ingest.docs import DOC_EXTS, chunk_pages, extract_document
 from genea.ingest.gedcom.mapper import map_gedcom
 from genea.ingest.gedcom.parser import parse_gedcom
@@ -25,6 +28,8 @@ from genea.text import normalize
 
 KIND_BY_EXT = {".ged": "ged", **{e: "doc" for e in DOC_EXTS}, **{e: "image" for e in IMAGE_EXTS}}
 EMBED_BATCH = 32
+LOCK_WAIT = 2.0  # seconds: rides out a `genea status` / `genea mcp` probe that holds the lock briefly
+PROGRESS_INTERVAL = 1.0  # seconds between progress file writes within a phase
 
 
 @dataclass
@@ -265,19 +270,64 @@ class _ImageBatches:
         return self.records.pop(image)
 
 
+class _Progress:
+    """Reports the run to `on_progress` on every step and to the progress file at most once a second."""
+
+    def __init__(self, kb: KnowledgeBase, callback: Callable[[IndexProgress], None] | None) -> None:
+        self.kb = kb
+        self.callback = callback
+        now = now_iso()
+        self.state = IndexProgress(pid=os.getpid(), started_at=now, phase="scanning",
+                                   phase_started_at=now, updated_at=now)
+        self._written = 0.0
+        self._emit(force=True)
+
+    def phase(self, name: str, total: int = 0) -> None:
+        now = now_iso()
+        self.state.phase, self.state.phase_started_at, self.state.updated_at = name, now, now
+        self.state.done, self.state.total, self.state.current = 0, total, None
+        self._emit(force=True)
+
+    def update(self, done: int, current: str | None = None) -> None:
+        self.state.done, self.state.current = done, current
+        self._emit()
+
+    def _emit(self, force: bool = False) -> None:
+        if force or time.monotonic() - self._written >= PROGRESS_INTERVAL:
+            self.state.updated_at = now_iso()
+            write_progress(self.kb, self.state)
+            self._written = time.monotonic()
+        if self.callback:
+            self.callback(self.state)
+
+
 def index_kb(kb: KnowledgeBase, embedder: Embedder, rebuild: bool = False,
-             on_file: Callable[[str], None] | None = None) -> IndexReport:
+             on_progress: Callable[[IndexProgress], None] | None = None) -> IndexReport:
+    """Raises IndexBusy when another run holds the lock, IndexInUse when a rebuild cannot delete the index."""
+    with IndexLock(kb, wait=LOCK_WAIT):
+        try:
+            return _index_locked(kb, embedder, rebuild, _Progress(kb, on_progress))
+        finally:
+            clear_progress(kb)
+
+
+def _index_locked(kb: KnowledgeBase, embedder: Embedder, rebuild: bool, progress: _Progress) -> IndexReport:
     if rebuild and kb.index_path.exists():
-        kb.index_path.unlink()
+        try:
+            kb.index_path.unlink()
+        except PermissionError as exc:  # Windows: still open, typically by `genea mcp`
+            raise IndexInUse() from exc
     report = IndexReport()
     conn = open_index(kb, embedder)
     try:
+        set_index_state(conn, "running")  # stays 'running' if this run dies: seen as interrupted
         known = {r["path"]: r for r in conn.execute("SELECT id, path, sha256, mtime, status FROM files")}
         seen: set[str] = set()
         pending = []  # (path, kind, rel, digest, old row) of the files that need indexing
         for path, kind in scan_files(kb):
             rel = kb.rel(path)
             seen.add(rel)
+            progress.update(len(seen))
             old = known.get(rel)
             try:
                 mtime = source_mtime(path, kind)
@@ -294,10 +344,10 @@ def index_kb(kb: KnowledgeBase, embedder: Embedder, rebuild: bool = False,
                 report.skipped += 1
                 continue
             pending.append((path, kind, rel, digest, old))
+        progress.phase("indexing", total=len(pending))
         records = _ImageBatches(kb, [path for path, kind, *_ in pending if kind == "image"])
-        for path, kind, rel, digest, old in pending:
-            if on_file:
-                on_file(rel)
+        for done, (path, kind, rel, digest, old) in enumerate(pending):
+            progress.update(done, rel)
             _index_one(conn, kb, embedder, path, kind, digest, old["id"] if old else None, report,
                        record=records.get(path) if kind == "image" else None)
         for rel, row in known.items():
@@ -305,8 +355,10 @@ def index_kb(kb: KnowledgeBase, embedder: Embedder, rebuild: bool = False,
                 with conn:
                     remove_file(conn, row["id"])
                 report.removed += 1
+        progress.phase("linking")
         with conn:
             rebuild_links(conn)
+        set_index_state(conn, "complete")
     finally:
         conn.close()
     return report
@@ -315,12 +367,13 @@ def index_kb(kb: KnowledgeBase, embedder: Embedder, rebuild: bool = False,
 def reindex_file(kb: KnowledgeBase, embedder: Embedder, path: Path) -> None:
     """Re-index one file (used after applying a change)."""
     kind = KIND_BY_EXT[path.suffix.lower()]
-    conn = open_index(kb, embedder)
-    try:
-        row = conn.execute("SELECT id FROM files WHERE path = ?", (kb.rel(path),)).fetchone()
-        _index_one(conn, kb, embedder, path, kind, file_hash(path, kind),
-                   row["id"] if row else None, IndexReport())
-        with conn:
-            rebuild_links(conn)
-    finally:
-        conn.close()
+    with IndexLock(kb, wait=LOCK_WAIT):
+        conn = open_index(kb, embedder)
+        try:
+            row = conn.execute("SELECT id FROM files WHERE path = ?", (kb.rel(path),)).fetchone()
+            _index_one(conn, kb, embedder, path, kind, file_hash(path, kind),
+                       row["id"] if row else None, IndexReport())
+            with conn:
+                rebuild_links(conn)
+        finally:
+            conn.close()
