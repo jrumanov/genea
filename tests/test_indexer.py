@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -6,7 +7,7 @@ import pytest
 from genea.index.db import SchemaMismatch, open_index
 from genea.index.embed import FakeEmbedder
 from genea.index.indexer import index_kb, name_forms, scan_files, source_mtime
-from genea.index.progress import IndexBusy, IndexInUse, IndexLock, index_state, is_index_running, read_progress
+from genea.index.progress import IndexBusy, IndexDbLocked, IndexInUse, IndexLock, index_state, is_index_running, read_progress
 
 
 def _query(kb, sql, params=()):
@@ -377,4 +378,23 @@ def test_rebuild_of_an_open_index_explains_why(kb, monkeypatch):
     monkeypatch.setattr(Path, "unlink", locked)
     with pytest.raises(IndexInUse, match="genea mcp"):
         index_kb(kb, FakeEmbedder(), rebuild=True)
+    assert is_index_running(kb) is False
+
+
+def _hold_write_lock(kb):
+    """Another program in the middle of a write, like a `genea index` started before the index lock existed."""
+    other = sqlite3.connect(kb.index_path)
+    other.execute("BEGIN EXCLUSIVE")
+    return other
+
+
+def test_database_locked_by_another_writer_is_explained(kb, monkeypatch):
+    index_kb(kb, FakeEmbedder())
+    monkeypatch.setattr("genea.index.db.BUSY_TIMEOUT", 0.1)
+    other = _hold_write_lock(kb)
+    try:
+        with pytest.raises(IndexDbLocked, match="started before this version"):
+            index_kb(kb, FakeEmbedder())
+    finally:
+        other.close()
     assert is_index_running(kb) is False

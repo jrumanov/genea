@@ -11,7 +11,7 @@ from genea.cli import common
 from genea.cli.app import app
 from genea.index.db import SchemaMismatch
 from genea.index.indexer import index_kb
-from genea.index.progress import IndexBusy, IndexInUse, IndexProgress
+from genea.index.progress import IndexBusy, IndexDbLocked, IndexInUse, IndexProgress
 from genea.index.status import index_summary
 
 CURRENT_WIDTH = 50  # characters of the current file's path shown next to the bar
@@ -44,7 +44,7 @@ def index(
 
         try:
             report = index_kb(kb, common.get_embedder(kb), rebuild=rebuild, on_progress=show)
-        except (SchemaMismatch, IndexBusy, IndexInUse) as exc:
+        except (SchemaMismatch, IndexBusy, IndexInUse, IndexDbLocked) as exc:
             bar.stop()
             common.console.print(f"[red]{escape(str(exc))}[/red]")
             raise typer.Exit(1) from exc

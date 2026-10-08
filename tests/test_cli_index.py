@@ -68,3 +68,18 @@ def test_index_refuses_a_second_run(sample_root, monkeypatch):
         result = runner.invoke(app, ["--kb", str(sample_root), "index"])
     assert result.exit_code == 1
     assert "already running" in result.output
+
+
+def test_index_explains_a_locked_database(sample_root, monkeypatch):
+    _prepare(sample_root, monkeypatch)
+    assert runner.invoke(app, ["--kb", str(sample_root), "index"]).exit_code == 0
+    monkeypatch.setattr("genea.index.db.BUSY_TIMEOUT", 0.1)
+    other = sqlite3.connect(KnowledgeBase.open(str(sample_root)).index_path)
+    other.execute("BEGIN EXCLUSIVE")
+    try:
+        result = runner.invoke(app, ["--kb", str(sample_root), "index"])
+    finally:
+        other.close()
+    assert result.exit_code == 1
+    assert "another program" in result.output
+    assert "Traceback" not in result.output

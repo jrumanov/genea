@@ -18,7 +18,7 @@ import sqlite_vec
 from genea.exiftool import ExifToolError
 from genea.index.db import open_index, set_index_state
 from genea.index.embed import Embedder
-from genea.index.progress import IndexInUse, IndexLock, IndexProgress, clear_progress, now_iso, write_progress
+from genea.index.progress import IndexDbLocked, IndexInUse, IndexLock, IndexProgress, clear_progress, now_iso, write_progress
 from genea.ingest.docs import DOC_EXTS, chunk_pages, extract_document
 from genea.ingest.gedcom.mapper import map_gedcom
 from genea.ingest.gedcom.parser import parse_gedcom
@@ -303,10 +303,15 @@ class _Progress:
 
 def index_kb(kb: KnowledgeBase, embedder: Embedder, rebuild: bool = False,
              on_progress: Callable[[IndexProgress], None] | None = None) -> IndexReport:
-    """Raises IndexBusy when another run holds the lock, IndexInUse when a rebuild cannot delete the index."""
+    """Raises IndexBusy when another run holds the lock, IndexInUse when a rebuild cannot delete the index,
+    and IndexDbLocked when a program that ignores the lock keeps the database locked."""
     with IndexLock(kb, wait=LOCK_WAIT):
         try:
             return _index_locked(kb, embedder, rebuild, _Progress(kb, on_progress))
+        except sqlite3.OperationalError as exc:
+            if "locked" in str(exc):
+                raise IndexDbLocked() from exc
+            raise
         finally:
             clear_progress(kb)
 
