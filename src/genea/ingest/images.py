@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from genea.exiftool import read_metadata
+from genea.exiftool import ExifToolError, read_metadata
 
 IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".tif", ".tiff", ".png", ".heic"})
 
@@ -140,6 +140,22 @@ def merge_metadata(embedded: dict, sidecar_md: dict | None, sidecar: Path | None
     if sidecar_md is not None:
         fields.update(map_fields(sidecar_md))
     return _record(fields, sidecar)
+
+
+def extract_images(paths: list[Path], exe: str = "exiftool") -> dict[Path, ImageRecord]:
+    """Like extract_image for many images, with a single ExifTool run. Raises ExifToolError if the run
+    fails (one bad file fails the whole run), so a caller can fall back to extract_image per file."""
+    sidecars = [sidecar_for(path) for path in paths]
+    files = [f for path, sidecar in zip(paths, sidecars) for f in (path, sidecar) if f is not None]
+    records = read_metadata(files, exe)
+    if len(records) != len(files):
+        raise ExifToolError(f"ExifTool returned {len(records)} records for {len(files)} files")
+    found = iter(records)
+    result = {}
+    for path, sidecar in zip(paths, sidecars):
+        embedded = next(found)
+        result[path] = merge_metadata(embedded, next(found) if sidecar else None, sidecar)
+    return result
 
 
 def extract_image(path: Path, exe: str = "exiftool") -> ImageRecord:
