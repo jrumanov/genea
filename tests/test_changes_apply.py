@@ -32,6 +32,11 @@ def test_xmp_args():
     assert xmp_args(dated, Path("p.xmp")) == [
         "-overwrite_original", "-XMP-photoshop:DateCreated=1936-07-01", "-XMP-exif:DateTimeOriginal=",
         "-XMP-dc:Title^=", "p.xmp"]
+    mixed = change.model_copy(update={"payload": {"XMP-iptcExt:PersonInImage": ["A", "", " ", "B"],
+                                                  "XMP-photoshop:City": ["", " "]}})
+    assert xmp_args(mixed, Path("p.xmp")) == [  # blank items are dropped; a list of only blanks clears
+        "-overwrite_original", "-XMP-iptcExt:PersonInImage=A", "-XMP-iptcExt:PersonInImage=B",
+        "-XMP-photoshop:City^=", "p.xmp"]
     add = change.model_copy(update={"operation": "add_keywords", "payload": {"keywords": ["x"]}})
     assert xmp_args(add, Path("p.xmp"), ["a", "x"]) == [
         "-overwrite_original", "-XMP-dc:Subject=a", "-XMP-dc:Subject=x", "p.xmp"]  # the whole resulting list
@@ -283,6 +288,16 @@ def test_date_correction_beats_embedded_xmp_exif_date(embedded_photo):
     assert _image_row(ctx, "photos/datum.jpg")["date_taken"] == "1936-07-01"
     undo_change(ctx.kb, store, change_id, FakeEmbedder())
     assert _image_row(ctx, "photos/datum.jpg")["date_taken"] == "1935-05-01"
+
+
+@pytest.mark.exiftool
+def test_blank_list_items_do_not_delete_the_tag(embedded_photo):
+    ctx = embedded_photo("lide.jpg")
+    store = ChangeStore(ctx.kb)
+    change_id = _image_change(ctx, "photos/lide.jpg", payload={"XMP-iptcExt:PersonInImage": ["Jan Novák", ""]})
+    assert describe_change(ctx.kb, store.get(change_id)) == [("XMP-iptcExt:PersonInImage", "", "Jan Novák")]
+    apply_change(ctx.kb, store, change_id, FakeEmbedder())
+    assert json.loads(_image_row(ctx, "photos/lide.jpg")["persons_shown"]) == ["Jan Novák"]
 
 
 @pytest.mark.exiftool

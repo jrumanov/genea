@@ -36,6 +36,11 @@ def _reindex(kb: KnowledgeBase, embedder: Embedder, image: Path, change: Change)
         raise ReindexFailed(change, exc) from exc
 
 
+def _values(value) -> list[str]:
+    """The non-blank items of a field value. An empty item must not reach ExifTool: `-TAG=` deletes the tag."""
+    return [v for v in (value if isinstance(value, list) else [value]) if v.strip()]
+
+
 def keywords_after(change: Change, before: list[str]) -> list[str]:
     """The keyword list a keyword change leaves, given the image's effective keywords."""
     keywords = change.payload["keywords"]
@@ -57,8 +62,8 @@ def xmp_args(change: Change, sidecar: Path, keywords: list[str] | None = None) -
     args = ["-overwrite_original"]
     if change.operation == "set_fields":
         for key, value in change.payload.items():
-            values = value if isinstance(value, list) else [value]
-            if not any(values):
+            values = _values(value)
+            if not values:
                 args.append(f"-{key}=" if key == DATE_FIELD else f"-{key}^=")
             else:
                 args += [f"-{key}={v}" for v in values]
@@ -185,7 +190,7 @@ def describe_change(kb: KnowledgeBase, change: Change) -> list[tuple[str, str, s
         return [(key, "", _fmt(value)) for key, value in change.payload.items()]
     current = _current_metadata(kb, change)
     if change.operation == "set_fields":
-        rows = [(key, "?" if current is None else _fmt(current.get(key)), _fmt(value))
+        rows = [(key, "?" if current is None else _fmt(current.get(key)), _fmt(_values(value)))
                 for key, value in change.payload.items()]
         if DATE_FIELD in change.payload and (current is None or SHADOWING_DATE_FIELD in current):
             rows.append((SHADOWING_DATE_FIELD, "?" if current is None else _fmt(current[SHADOWING_DATE_FIELD]), ""))
