@@ -100,6 +100,10 @@ def validate_change(kb: KnowledgeBase, target_kind: str, target_path: str,
             for key, value in payload.items():
                 if not _is_text_list(value):
                     raise ChangeError(f"{key} must be a string or a list of strings")
+            date = payload.get("XMP-photoshop:DateCreated")
+            if date is not None and not any(v.strip() for v in ([date] if isinstance(date, str) else date)):
+                raise ChangeError("XMP-photoshop:DateCreated cannot be cleared: the image's own embedded date "
+                                  "would show through again. Give a date, or leave the field out.")
         elif operation in ("add_keywords", "remove_keywords"):
             keywords = payload.get("keywords")
             if not isinstance(keywords, list) or not keywords or not all(

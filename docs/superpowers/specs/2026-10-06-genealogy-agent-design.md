@@ -290,7 +290,8 @@ Global option: `--kb <path|name>`.
 Found in the final whole-branch review of the v1 implementation. **Fixed** on `jrumanov/keyword-defect-fix`:
 `apply_change` computes the image's effective keyword list (`effective_keywords`), applies the add or
 remove, and writes the whole list to the sidecar; `describe_change` uses the same list for "before".
-The related remove-with-no-sidecar failure is fixed by the same change. The two other minors below remain.
+The related remove-with-no-sidecar failure is fixed by the same change. The two other minors below were fixed afterwards on `jrumanov/parked-minors-fix`: a blank date is rejected
+in validation, and blank list items are dropped before ExifTool sees them.
 
 **Problem.** The XMP sidecar is authoritative per field: when it carries `XMP-dc:Subject`,
 that list replaces the embedded keywords (the union of the image's `XMP-dc:Subject` and
