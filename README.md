@@ -24,6 +24,40 @@ missing-module errors, enable long paths (`git config --system core.longpaths tr
 `bge-m3`; `person`, `conflicts`, `status` and `changes` work without any model. ExifTool is needed
 to read image metadata and to write XMP sidecars. `genea doctor` diagnoses all of this.
 
+## Use with Claude (MCP)
+
+`genea mcp` serves the knowledge base to Claude Code or Claude Desktop as a **read-only** MCP server
+(search, people, relatives, timelines, documents, photos, conflict checks). Notes and proposed changes
+still go through the `genea` CLI.
+
+```bash
+uv sync --extra mcp
+genea --kb <kb> index        # the knowledge base must be indexed first
+```
+
+Claude Code:
+
+```bash
+claude mcp add genea -- uv run --directory <path to this repo> --extra mcp genea --kb <kb> mcp
+```
+
+Claude Desktop (`claude_desktop_config.json`; use absolute paths, and double backslashes on Windows):
+
+```json
+{
+  "mcpServers": {
+    "genea": {
+      "command": "uv",
+      "args": ["run", "--directory", "C:\\path\\to\\genealogy-rag", "--extra", "mcp", "genea", "--kb", "C:\\path\\to\\kb", "mcp"]
+    }
+  }
+}
+```
+
+Ollama is optional here: without it, document search falls back to keywords. Tool results, which contain
+your family-tree data, are sent to the Claude client you connect (hide the startup note with
+`privacy_notice = false`).
+
 ## Quick start
 
 ```powershell
@@ -54,6 +88,7 @@ variable works too.
 | `genea ask "..."` / `chat` | Talk to the agent (`--show-tools` shows its tool calls) |
 | `genea person <name or id>` | Look a person up without the LLM |
 | `genea conflicts [id]` | Rule-based consistency checks without the LLM |
+| `genea mcp` | Serve the knowledge base to Claude as a read-only MCP server (see "Use with Claude") |
 | `genea changes list / show / apply / reject / undo / export` | Review what the agent proposed |
 
 ## How changes work
