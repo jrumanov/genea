@@ -130,7 +130,7 @@ def test_truncated_output_keeps_sources_marker_and_limit(tools):
 
 
 def test_shrink_trims_lists_and_keeps_unicode_intact():
-    from genea.agent.core import _shrink
+    from genea.tool_runner import shrink as _shrink
 
     data = {"items": [{"t": "Žluťoučký kůň úpěl ďábelské ódy " * 20} for _ in range(50)],
             "sources": [{"file": "tree.ged", "line": n % 3} for n in range(30)]}

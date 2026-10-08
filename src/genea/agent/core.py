@@ -9,15 +9,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelMessage, ToolCallPart
 from pydantic_ai.usage import UsageLimits
 
 from genea.agent.prompt import SYSTEM_PROMPT
 from genea.kb import KnowledgeBase
+from genea.tool_runner import run_tool
 from genea.tools import conflicts, curate, people, search
-from genea.tools.base import ToolContext, ToolError
+from genea.tools.base import ToolContext
 from genea.tools.models import SourceRef
 
 
@@ -32,78 +32,8 @@ class Answer:
     messages: list[ModelMessage]
 
 
-TRUNCATION_MARKER = " …[truncated: narrow the query]"
-
-
-def _dump(data: Any) -> str:
-    return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-
-
-def _cut_strings(value: Any, cap: int) -> Any:
-    if isinstance(value, str):
-        return value if len(value) <= cap else value[:cap] + "…"
-    if isinstance(value, list):
-        return [_cut_strings(v, cap) for v in value]
-    if isinstance(value, dict):
-        return {k: _cut_strings(v, cap) for k, v in value.items()}
-    return value
-
-
-def _shrink(data: dict[str, Any], limit: int) -> str:
-    """Fit a tool result into `limit` characters, always keeping `sources` (deduplicated).
-
-    The output stays valid JSON followed by TRUNCATION_MARKER (the only text allowed beyond `limit`).
-    Order of trimming: long strings, then list items, then everything but `sources`; at least one
-    source is always kept, even if that alone exceeds a tiny limit.
-    """
-    sources: list[Any] = []
-    for src in data.get("sources", []):
-        if src not in sources:
-            sources.append(src)
-    data = {**data, "sources": sources, "truncated": True}
-
-    def fits(d: dict[str, Any]) -> bool:
-        return len(_dump(d)) <= limit
-
-    for cap in (2000, 500, 200, 80):
-        data = _cut_strings(data, cap)
-        if fits(data):
-            return _dump(data)
-    lists = [k for k, v in data.items() if k != "sources" and isinstance(v, list)]
-    for key in lists:
-        while len(data[key]) > 1 and not fits(data):
-            data[key] = data[key][: len(data[key]) // 2]
-        if fits(data):
-            return _dump(data)
-    data = {"sources": data["sources"], "truncated": True}
-    while len(data["sources"]) > 1 and not fits(data):
-        data["sources"] = data["sources"][: len(data["sources"]) // 2]
-    return _dump(data)
-
-
-def _render(ctx: RunContext[ToolContext], result: BaseModel) -> str:
-    text = result.model_dump_json(exclude_none=True)
-    limit = ctx.deps.kb.settings.tool_output_chars
-    if len(text) <= limit:
-        return text
-    return _shrink(result.model_dump(mode="json", exclude_none=True), limit) + TRUNCATION_MARKER
-
-
-def _error(ctx: RunContext[ToolContext], message: str) -> str:
-    """A failure is a normal tool result, so repeated failures never exhaust a per-tool retry budget."""
-    limit = ctx.deps.kb.settings.tool_output_chars
-    if len(message) > limit:
-        message = message[:limit] + "…"
-    return _dump({"error": message})
-
-
 def _call(ctx: RunContext[ToolContext], fn, *args, **kwargs) -> str:
-    try:
-        return _render(ctx, fn(ctx.deps, *args, **kwargs))
-    except ToolError as exc:
-        return _error(ctx, str(exc))
-    except Exception as exc:  # noqa: BLE001 - one bad file or index must not crash the agent loop
-        return _error(ctx, f"{fn.__name__} failed: {type(exc).__name__}: {exc}")
+    return run_tool(ctx.deps, fn, *args, **kwargs).text
 
 
 def build_agent(model) -> Agent[ToolContext, str]:

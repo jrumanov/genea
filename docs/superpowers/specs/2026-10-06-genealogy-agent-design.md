@@ -17,7 +17,7 @@ and applies. The same agent works with any KB by pointing it at a root folder.
 |---|---|
 | Role | Curator: Q&A + research + proposing edits |
 | LLM | Pluggable; local (Ollama) by default, cloud (e.g. Claude) via config |
-| Interface | Core library + CLI first; web UI and MCP adapter later |
+| Interface | Core library + CLI first; web UI and MCP adapter later (MCP adapter: see `2026-10-08-mcp-server-design.md`) |
 | Data in scope | GEDCOM, text documents (txt/md/docx/pdf), image metadata (EXIF/IPTC/XMP, `.xmp` sidecars) |
 | Images | Metadata only; no image-content analysis |
 | Write-back | v1: notes (direct) + image XMP sidecars (after approval); GEDCOM changes exported as patch/checklist. Direct `.ged` writes designed for, enabled in v2 |
@@ -45,7 +45,7 @@ the MCP adapter, multi-user use, and syncing with online trees.
 | CLI | Typer + Rich |
 | Config | TOML: global `~/.genea/config.toml`, per-KB `<kb>/.genea/config.toml` |
 | Tests | pytest; PydanticAI `TestModel`/`FunctionModel` for agent tests |
-| Later | FastAPI web UI, official MCP Python SDK adapter |
+| Later | FastAPI web UI, official MCP Python SDK adapter (MCP adapter: see `2026-10-08-mcp-server-design.md`) |
 
 External installs (not pip): **Ollama**, **ExifTool**. `genea doctor` checks for both.
 
