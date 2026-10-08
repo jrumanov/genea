@@ -287,7 +287,10 @@ Global option: `--kb <path|name>`.
 
 ### Keyword changes drop embedded IPTC-only keywords from the index
 
-Found in the final whole-branch review of the v1 implementation. Not fixed in v1.
+Found in the final whole-branch review of the v1 implementation. **Fixed** on `jrumanov/keyword-defect-fix`:
+`apply_change` computes the image's effective keyword list (`effective_keywords`), applies the add or
+remove, and writes the whole list to the sidecar; `describe_change` uses the same list for "before".
+The related remove-with-no-sidecar failure is fixed by the same change. The two other minors below remain.
 
 **Problem.** The XMP sidecar is authoritative per field: when it carries `XMP-dc:Subject`,
 that list replaces the embedded keywords (the union of the image's `XMP-dc:Subject` and

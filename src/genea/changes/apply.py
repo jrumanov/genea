@@ -10,7 +10,7 @@ from genea.changes.store import Change, ChangeError, ChangeStore, StaleChange, n
 from genea.exiftool import ExifToolError, read_metadata, run_exiftool
 from genea.index.embed import Embedder
 from genea.index.indexer import reindex_file
-from genea.ingest.images import default_sidecar, sidecar_for
+from genea.ingest.images import default_sidecar, extract_image, sidecar_for
 from genea.kb import KnowledgeBase
 
 ABSENT = "<absent>"  # backup marker: there was no sidecar before the change
@@ -36,10 +36,24 @@ def _reindex(kb: KnowledgeBase, embedder: Embedder, image: Path, change: Change)
         raise ReindexFailed(change, exc) from exc
 
 
-def xmp_args(change: Change, sidecar: Path) -> list[str]:
+def keywords_after(change: Change, before: list[str]) -> list[str]:
+    """The keyword list a keyword change leaves, given the image's effective keywords."""
+    keywords = change.payload["keywords"]
+    if change.operation == "add_keywords":
+        return list(dict.fromkeys([*before, *keywords]))
+    return [k for k in before if k not in keywords]
+
+
+def effective_keywords(kb: KnowledgeBase, image: Path) -> list[str]:
+    """The keywords the index shows for the image: the sidecar's list if it has one, else the embedded ones."""
+    return extract_image(image, kb.settings.exiftool).keywords
+
+
+def xmp_args(change: Change, sidecar: Path, keywords: list[str] | None = None) -> list[str]:
     """ExifTool arguments for the change. An empty value is written as an empty tag (`-TAG^=`), which
     the sidecar keeps, so it clears the field instead of letting the image's embedded value show
-    through (dates cannot be empty: they are deleted instead)."""
+    through (dates cannot be empty: they are deleted instead). A keyword change writes the whole
+    resulting list (`keywords`), so the sidecar list replaces the embedded keywords with no loss."""
     args = ["-overwrite_original"]
     if change.operation == "set_fields":
         for key, value in change.payload.items():
@@ -50,12 +64,10 @@ def xmp_args(change: Change, sidecar: Path) -> list[str]:
                 args += [f"-{key}={v}" for v in values]
             if key == DATE_FIELD:
                 args.append(f"-{SHADOWING_DATE_FIELD}=")
-    elif change.operation == "add_keywords":
-        args.append(f"-{KEYWORD_FIELD}-=")  # drop the empty "no keywords" placeholder, if any
-        for keyword in change.payload["keywords"]:
-            args += [f"-{KEYWORD_FIELD}-={keyword}", f"-{KEYWORD_FIELD}+={keyword}"]  # no duplicates
-    elif change.operation == "remove_keywords":
-        args += [f"-{KEYWORD_FIELD}-={k}" for k in change.payload["keywords"]]
+    elif change.operation in ("add_keywords", "remove_keywords"):
+        if keywords is None:
+            raise ChangeError("a keyword change needs the image's resulting keyword list")
+        args += [f"-{KEYWORD_FIELD}={k}" for k in keywords] or [f"-{KEYWORD_FIELD}^="]
     else:
         raise ChangeError(f"Unknown image operation {change.operation!r}")
     return [*args, str(sidecar)]
@@ -82,6 +94,9 @@ def apply_change(kb: KnowledgeBase, store: ChangeStore, change_id: str, embedder
         raise StaleChange(f"{change.id}: {change.target['path']} changed after the proposal; "
                           "ask the agent to propose it again.")
     sidecar = default_sidecar(image)
+    keywords = None
+    if change.operation in ("add_keywords", "remove_keywords"):
+        keywords = keywords_after(change, effective_keywords(kb, image))  # read before anything is written
     if sidecar.exists():
         backup = kb.backups_dir / f"{datetime.now():%Y%m%dT%H%M%S%f}" / kb.rel(sidecar)
         backup.parent.mkdir(parents=True, exist_ok=True)
@@ -96,11 +111,7 @@ def apply_change(kb: KnowledgeBase, store: ChangeStore, change_id: str, embedder
                 run_exiftool(["-tagsfromfile", str(image), "-xmp:all", str(sidecar)], exe)
             except ExifToolError:
                 pass  # the image has no XMP; the next call creates the sidecar from scratch
-        run_exiftool(xmp_args(change, sidecar), exe)
-        if change.operation == "remove_keywords" and KEYWORD_FIELD not in read_metadata([sidecar], exe)[0]:
-            # ExifTool drops an emptied list; an empty keyword records "no keywords" in the sidecar,
-            # so the image's embedded keywords do not come back.
-            run_exiftool(["-overwrite_original", f"-{KEYWORD_FIELD}^=", str(sidecar)], exe)
+        run_exiftool(xmp_args(change, sidecar, keywords), exe)
     except Exception:
         if backup_ref == ABSENT:
             sidecar.unlink(missing_ok=True)
@@ -179,11 +190,9 @@ def describe_change(kb: KnowledgeBase, change: Change) -> list[tuple[str, str, s
         if DATE_FIELD in change.payload and (current is None or SHADOWING_DATE_FIELD in current):
             rows.append((SHADOWING_DATE_FIELD, "?" if current is None else _fmt(current[SHADOWING_DATE_FIELD]), ""))
         return rows
-    keywords = change.payload["keywords"]
-    adding = change.operation == "add_keywords"
-    if current is None:
-        return [(KEYWORD_FIELD, "?", ("+ " if adding else "- ") + ", ".join(keywords))]
-    raw = current.get(KEYWORD_FIELD)
-    before = [str(k) for k in (raw if isinstance(raw, list) else [raw]) if str(k) != ""] if raw is not None else []
-    after = list(dict.fromkeys(before + keywords)) if adding else [k for k in before if k not in keywords]
-    return [(KEYWORD_FIELD, _fmt(before), _fmt(after))]
+    try:
+        before = effective_keywords(kb, kb.resolve_inside(change.target["path"]))
+    except ExifToolError:
+        prefix = "+ " if change.operation == "add_keywords" else "- "
+        return [(KEYWORD_FIELD, "?", prefix + ", ".join(change.payload["keywords"]))]
+    return [(KEYWORD_FIELD, _fmt(before), _fmt(keywords_after(change, before)))]
