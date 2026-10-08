@@ -33,10 +33,12 @@ def test_xmp_args():
         "-overwrite_original", "-XMP-photoshop:DateCreated=1936-07-01", "-XMP-exif:DateTimeOriginal=",
         "-XMP-dc:Title^=", "p.xmp"]
     add = change.model_copy(update={"operation": "add_keywords", "payload": {"keywords": ["x"]}})
-    assert xmp_args(add, Path("p.xmp")) == ["-overwrite_original", "-XMP-dc:Subject-=", "-XMP-dc:Subject-=x",
-                                            "-XMP-dc:Subject+=x", "p.xmp"]
+    assert xmp_args(add, Path("p.xmp"), ["a", "x"]) == [
+        "-overwrite_original", "-XMP-dc:Subject=a", "-XMP-dc:Subject=x", "p.xmp"]  # the whole resulting list
     remove = change.model_copy(update={"operation": "remove_keywords", "payload": {"keywords": ["x"]}})
-    assert xmp_args(remove, Path("p.xmp")) == ["-overwrite_original", "-XMP-dc:Subject-=x", "p.xmp"]
+    assert xmp_args(remove, Path("p.xmp"), []) == ["-overwrite_original", "-XMP-dc:Subject^=", "p.xmp"]
+    with pytest.raises(ChangeError):
+        xmp_args(add, Path("p.xmp"))
 
 
 def test_stale_change_is_not_applied(tools):
@@ -221,6 +223,50 @@ def test_removed_keyword_disappears_despite_embedded_iptc_keywords(embedded_phot
     assert json.loads(_image_row(ctx, "photos/rodina.jpg")["keywords"]) == [*left, "Brno"]
     sidecar = ctx.kb.root / "photos" / "rodina.xmp"
     assert read_metadata([sidecar])[0]["XMP-dc:Subject"] in ([*left, "Brno"], "Brno")  # no empty placeholder
+
+
+def _keywords(ctx, rel):
+    return json.loads(_image_row(ctx, rel)["keywords"])
+
+
+@pytest.mark.exiftool
+@pytest.mark.parametrize("xmp_tags", [(), ("-XMP-dc:Subject=rodina",)], ids=["iptc-only", "iptc-plus-partial-xmp"])
+def test_add_keyword_keeps_embedded_iptc_keywords(embedded_photo, xmp_tags):
+    ctx = embedded_photo("rodina.jpg", "-IPTC:Keywords=rodina", "-IPTC:Keywords=svatba", *xmp_tags)
+    store = ChangeStore(ctx.kb)
+    change_id = _image_change(ctx, "photos/rodina.jpg", "add_keywords", {"keywords": ["Brno"]})
+    [(_, before, after)] = describe_change(ctx.kb, store.get(change_id))
+    assert (before, after) == ("rodina, svatba", "rodina, svatba, Brno")
+    apply_change(ctx.kb, store, change_id, FakeEmbedder())
+    assert _keywords(ctx, "photos/rodina.jpg") == ["rodina", "svatba", "Brno"]
+
+
+@pytest.mark.exiftool
+@pytest.mark.parametrize("sidecar_first", [False, True], ids=["no-sidecar", "existing-sidecar"])
+def test_remove_keyword_from_iptc_only_image(embedded_photo, sidecar_first):
+    ctx = embedded_photo("rodina.jpg", "-IPTC:Keywords=rodina", "-IPTC:Keywords=svatba")
+    store = ChangeStore(ctx.kb)
+    if sidecar_first:  # a sidecar created by an unrelated change must not hide the embedded keywords
+        title_id = _image_change(ctx, "photos/rodina.jpg", "set_fields", {"XMP-dc:Title": "Rodina"})
+        apply_change(ctx.kb, store, title_id, FakeEmbedder())
+        assert _keywords(ctx, "photos/rodina.jpg") == ["rodina", "svatba"]
+    change_id = _image_change(ctx, "photos/rodina.jpg", "remove_keywords", {"keywords": ["rodina"]})
+    [(_, before, after)] = describe_change(ctx.kb, store.get(change_id))
+    assert (before, after) == ("rodina, svatba", "svatba")
+    apply_change(ctx.kb, store, change_id, FakeEmbedder())
+    assert _keywords(ctx, "photos/rodina.jpg") == ["svatba"]
+
+
+@pytest.mark.exiftool
+def test_add_after_removing_all_keywords_from_iptc_only_image(embedded_photo):
+    ctx = embedded_photo("rodina.jpg", "-IPTC:Keywords=rodina", "-IPTC:Keywords=svatba")
+    store = ChangeStore(ctx.kb)
+    remove_id = _image_change(ctx, "photos/rodina.jpg", "remove_keywords", {"keywords": ["rodina", "svatba"]})
+    apply_change(ctx.kb, store, remove_id, FakeEmbedder())
+    assert _keywords(ctx, "photos/rodina.jpg") == []
+    add_id = _image_change(ctx, "photos/rodina.jpg", "add_keywords", {"keywords": ["Brno"]})
+    apply_change(ctx.kb, store, add_id, FakeEmbedder())
+    assert _keywords(ctx, "photos/rodina.jpg") == ["Brno"]
 
 
 @pytest.mark.exiftool
