@@ -27,7 +27,10 @@ links, any change to the Whisper pipeline.
 
 Whisper output, one segment per line: `start<TAB>end<TAB> text` (seconds as decimals, text with a leading
 space). No speaker labels. A `.txt` file is a transcript when at least 80% of its non-empty lines match that
-shape; this is decided by content, not by folder. The first 50 non-empty lines are enough to decide.
+shape; this is decided by content, not by folder. The first 50 non-empty lines are enough to decide. Both
+times must have a decimal point and the end must not be before the start, so a tab-separated table such as
+`1845<TAB>12<TAB>Narodenie: Ján Novák` (year, page, entry) stays an ordinary text document. Whisper always
+writes decimals (`0.600000`), as do all of the user's real transcripts.
 
 ## Part A: parsing, chunking, citations
 
@@ -47,7 +50,7 @@ New module `src/genea/ingest/transcript.py`:
 - `Chunk` gains `start_s: float | None = None`, `end_s: float | None = None`.
 - `extract_document` returns, for a transcript, a `DocExtract` with `segments` set and `pages` empty, so
   existing callers that only know pages are not mixed up. `DocExtract` gains `segments: list[Segment]`
-  (default empty) and `is_transcript` derived from it.
+  (default empty); callers test `extract.segments` directly (no separate `is_transcript` property was needed).
 
 Schema (`index/db.py`), `SCHEMA_VERSION` "1" to "2":
 
@@ -124,7 +127,8 @@ Progress and CLI:
   (`indexcmds.py` bar, `index_status`) treat it as another phase; the bar shows a description for it.
 - `genea index --no-summaries` flag. `common.get_summarizer(kb)` mirrors `get_embedder`.
 
-Evidence rule (`agent/prompt.py`), a new rule 7 for both the agent and MCP prompts:
+Evidence rule (`agent/prompt.py`), a new last rule in both prompts (rule 6 in the agent prompt, rule 7 in
+the MCP prompt, which has one more rule); rule 1 also shows the `[file.txt @14:20]` citation form:
 
 > Search hits marked as summaries (kind `summary`) are generated, not evidence. Use them to decide where to
 > look, then read the transcript with `read_document` from that time and cite what it says. Never cite a
@@ -149,8 +153,15 @@ passage cite its moment.
   context window may be smaller, which would silently cut the section.
 - When Ollama cannot be reached (`SummaryUnavailable`), the remaining transcripts of the run are not tried;
   they are indexed without summaries and marked `summary pending` with the reason.
-- `summary_model` is a plain Ollama model name (no `ollama:` prefix). If it is empty and the chat model is not
-  an `ollama:` one, there is no summarizer: `genea index` says so and marks transcripts `summary pending`.
+- `summary_model` is an Ollama model name; an `ollama:` prefix (as in the `model` key) is accepted and
+  stripped. If it is empty and the chat model is not an `ollama:` one, there is no summarizer: `genea index`
+  says so and marks transcripts `summary pending: summaries disabled`.
+- Errors: a connection failure is `SummaryUnavailable`; a read timeout is a `SummaryError` saying the model
+  did not answer within the timeout (600 s); other HTTP errors ask whether the model is pulled.
+- Embeddings also need Ollama, so with Ollama down files are recorded as errors as before; `summary pending`
+  covers a summary model that fails, times out or is not configured.
+- Upgrading: schema 2 needs a rebuild. The README suggests `genea index --rebuild --no-summaries` first
+  (everything searchable quickly), then `genea index` to add the summaries.
 - There is no `--resummarize` flag (decided with the user). Deleting a cache file or bumping `SUMMARY_VERSION`
   takes effect for a transcript when it is next indexed (changed file, `--rebuild`, or `summary pending`).
 
@@ -158,7 +169,8 @@ passage cite its moment.
 
 | Situation | Behaviour |
 | --- | --- |
-| Ollama down while summarizing | file indexed without summary, marked `summary pending`, retried next run |
+| Ollama down while summarizing | file indexed without summary, marked `summary pending`, retried next run; the remaining transcripts are not tried |
+| Summary model times out | same, with a timeout message |
 | Summarizer returns malformed JSON | same as above |
 | Cache file corrupt | treated as a miss, regenerated |
 | Embedder fails | unchanged: the file is recorded as an error |
@@ -187,3 +199,13 @@ passage cite its moment.
 - Section size (12,000 characters) and pause threshold (3 s) are constants, tuned on the user's three
   real transcripts without committing their content.
 - README gets a short "Transcripts" section describing the format, `--no-summaries` and `summary_model`.
+
+## Known follow-ups (from the final review, not done)
+
+- A summary that keeps failing is retried in full on every run (as specified); there is no retry limit.
+- `search_documents` output can exceed `tool_output_chars` with several long hits, so hit texts are cut to
+  500 characters (pre-existing; transcripts hit it often).
+- Conversational transcripts may produce more false year mismatches in `find_conflicts` than chronicles.
+- Old summary cache files are never cleaned up.
+- The progress file does not name the first transcript being summarized, and the "summaries are off" notice
+  prints even in a knowledge base without transcripts.
