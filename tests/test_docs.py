@@ -51,3 +51,15 @@ def test_chunking_long_page():
 def test_chunking_short_pages_continue_numbering():
     assert chunk_pages([Page(1, " short "), Page(2, "second")]) == [
         Chunk(1, 0, "short"), Chunk(2, 1, "second")]
+
+
+def test_whisper_transcript_has_segments_not_pages(tmp_path):
+    path = tmp_path / "2022_05_10-a_b_rozhovor.txt"
+    path.write_bytes("﻿0.600000\t8.560000\t Dobre.\r\n8.560000\t10.0\t Čo mám hovoriť?\r\n".encode("utf-8"))
+    extract = extract_document(path)
+    assert extract.pages == [] and not extract.needs_ocr
+    assert [s.text for s in extract.segments] == ["Dobre.", "Čo mám hovoriť?"]
+
+
+def test_ordinary_text_has_no_segments(sample_root):
+    assert extract_document(sample_root / "docs" / "kronika.txt").segments == []
