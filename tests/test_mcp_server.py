@@ -32,7 +32,7 @@ CASES = [
     ("relatives", {"person_id": JAN, "relation": "ancestors", "depth": 2}, people.relatives, (JAN, "ancestors", 2)),
     ("timeline", {"person_id": JAN}, people.timeline, (JAN,)),
     ("search_documents", {"query": "Josef", "k": 3}, search.search_documents, ("Josef", 3)),
-    ("read_document", {"path": "docs/kronika.txt"}, search.read_document, ("docs/kronika.txt", None)),
+    ("read_document", {"path": "docs/kronika.txt"}, search.read_document, ("docs/kronika.txt", None, None)),
     ("find_images", {"text": "Anna"}, search.find_images, (None, None, None, None, "Anna")),
     ("find_conflicts", {"person_id": JAN}, conflicts.find_conflicts, (JAN,)),
 ]

@@ -49,8 +49,9 @@ def test_read_document(tools):
 
 
 def test_read_document_truncates(tools):
-    small = KnowledgeBase(tools.kb.root, replace(tools.kb.settings, tool_output_chars=20))
-    doc = read_document(replace(tools, kb=small), "docs/kronika.txt")
+    (tools.kb.root / "docs" / "dlouha.txt").write_text("Kronika obce. " * 40, encoding="utf-8")  # 560 > budget floor 200
+    small = KnowledgeBase(tools.kb.root, replace(tools.kb.settings, tool_output_chars=650))
+    doc = read_document(replace(tools, kb=small), "docs/dlouha.txt")
     assert doc.truncated
     assert doc.text.endswith("[truncated]")
 
