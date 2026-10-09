@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from genea.index.embed import Embedder
     from genea.kb import KnowledgeBase
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 _SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -82,7 +82,10 @@ CREATE TABLE chunks (
     file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
     page INTEGER,
     chunk_no INTEGER NOT NULL,
-    text TEXT NOT NULL
+    text TEXT NOT NULL,
+    start_s REAL,
+    end_s REAL,
+    kind TEXT NOT NULL DEFAULT 'text'
 );
 CREATE VIRTUAL TABLE chunks_fts USING fts5(text, tokenize = 'unicode61 remove_diacritics 2');
 CREATE TABLE images (

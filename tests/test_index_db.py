@@ -12,7 +12,7 @@ def test_connect_creates_schema(tmp_path):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
     assert TABLES <= names
     meta = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta")}
-    assert meta == {"schema_version": "1", "embed_model": "fake", "embed_dim": "8"}
+    assert meta == {"schema_version": "2", "embed_model": "fake", "embed_dim": "8"}
     conn.close()
 
 
@@ -44,3 +44,13 @@ def test_fts_ignores_diacritics(tmp_path):
     conn.execute("INSERT INTO chunks_fts (rowid, text) VALUES (5, 'Terezie Dvořáková 1851')")
     rows = conn.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?", ('"dvorakova"',)).fetchall()
     assert [r[0] for r in rows] == [5]
+
+
+def test_index_from_schema_1_needs_a_rebuild(tmp_path):
+    path = tmp_path / "i.db"
+    conn = connect(path, "fake", 8)
+    conn.execute("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
+    conn.commit()
+    conn.close()
+    with pytest.raises(SchemaMismatch, match="--rebuild"):
+        connect(path, "fake", 8)

@@ -19,10 +19,11 @@ from genea.exiftool import ExifToolError
 from genea.index.db import open_index, set_index_state
 from genea.index.embed import Embedder
 from genea.index.progress import IndexDbLocked, IndexInUse, IndexLock, IndexProgress, clear_progress, now_iso, write_progress
-from genea.ingest.docs import DOC_EXTS, chunk_pages, extract_document
+from genea.ingest.docs import DOC_EXTS, chunk_pages, chunk_segments, extract_document
 from genea.ingest.gedcom.mapper import map_gedcom
 from genea.ingest.gedcom.parser import parse_gedcom
 from genea.ingest.images import IMAGE_EXTS, ImageRecord, extract_image, extract_images, sidecar_for
+from genea.ingest.transcript import transcript_header
 from genea.kb import KnowledgeBase
 from genea.text import normalize
 
@@ -119,16 +120,20 @@ def _ingest_doc(conn, kb, embedder, path, file_id) -> tuple[str, str | None]:
     extract = extract_document(path)
     if extract.needs_ocr:
         return "needs_ocr", "no text layer; OCR is needed"
-    chunks = chunk_pages(extract.pages)
+    if extract.segments:  # (chunk, text for FTS and the embedder): the recording's name adds searchable context
+        header = transcript_header(path.stem)
+        items = [(c, f"{header}\n{c.text}") for c in chunk_segments(extract.segments)]
+    else:
+        items = [(c, c.text) for c in chunk_pages(extract.pages)]
     vectors: list[list[float]] = []
-    for i in range(0, len(chunks), EMBED_BATCH):
-        vectors += embedder.embed([c.text for c in chunks[i:i + EMBED_BATCH]])
-    for chunk, vector in zip(chunks, vectors):
+    for i in range(0, len(items), EMBED_BATCH):
+        vectors += embedder.embed([indexed for _, indexed in items[i:i + EMBED_BATCH]])
+    for (chunk, indexed), vector in zip(items, vectors):
         chunk_id = conn.execute(
-            "INSERT INTO chunks (file_id, page, chunk_no, text) VALUES (?, ?, ?, ?)",
-            (file_id, chunk.page, chunk.chunk_no, chunk.text),
+            "INSERT INTO chunks (file_id, page, chunk_no, text, start_s, end_s, kind) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (file_id, chunk.page, chunk.chunk_no, chunk.text, chunk.start_s, chunk.end_s, chunk.kind),
         ).lastrowid
-        conn.execute("INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)", (chunk_id, chunk.text))
+        conn.execute("INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)", (chunk_id, indexed))
         conn.execute("INSERT INTO chunks_vec (chunk_id, embedding) VALUES (?, ?)",
                      (chunk_id, sqlite_vec.serialize_float32(vector)))
     return "ok", None
