@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-LINE = re.compile(r"^\s*(\d+(?:\.\d+)?)\t(\d+(?:\.\d+)?)\t(.*)$")
+# Whisper writes decimal seconds in both columns; "1845<TAB>12<TAB>entry" tables must not match
+LINE = re.compile(r"^\s*(\d+\.\d+)\t(\d+\.\d+)\t(.*)$")
 DETECT_LINES = 50  # the first non-empty lines decide whether a file is a transcript
 DETECT_SHARE = 0.8
 LOOP_RUN = 3  # this many identical segments in a row are Whisper looping on silence or noise
@@ -19,11 +20,16 @@ class Segment:
     text: str
 
 
+def _match(line: str) -> re.Match | None:
+    match = LINE.match(line)
+    return match if match and float(match.group(2)) >= float(match.group(1)) else None
+
+
 def is_transcript(text: str) -> bool:
     lines = [line for line in text.splitlines() if line.strip()][:DETECT_LINES]
     if not lines:
         return False
-    return sum(1 for line in lines if LINE.match(line)) / len(lines) >= DETECT_SHARE
+    return sum(1 for line in lines if _match(line)) / len(lines) >= DETECT_SHARE
 
 
 def parse_transcript(text: str) -> list[Segment]:
@@ -32,7 +38,7 @@ def parse_transcript(text: str) -> list[Segment]:
         return []
     segments: list[Segment] = []
     for line in text.splitlines():
-        match = LINE.match(line)
+        match = _match(line)
         body = match.group(3).strip() if match else ""
         if body:
             segments.append(Segment(float(match.group(1)), float(match.group(2)), body))

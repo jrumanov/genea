@@ -144,6 +144,8 @@ class OllamaSummarizer:
             response.raise_for_status()
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise SummaryUnavailable(f"Ollama is not reachable ({exc}). Is it running?") from exc
+        except httpx.TimeoutException as exc:
+            raise SummaryError(f"`{self.model}` did not answer within {self.timeout:g} s") from exc
         except httpx.HTTPError as exc:
             raise SummaryError(f"Ollama summary request failed ({exc}). Is `{self.model}` pulled?") from exc
         try:
@@ -157,6 +159,6 @@ class OllamaSummarizer:
 
 def make_summarizer(settings: Settings) -> OllamaSummarizer | None:
     """None when there is no local model to use: set summary_model, or use an ollama: chat model."""
-    name = settings.summary_model or (
+    name = settings.summary_model.removeprefix("ollama:") or (
         settings.model.removeprefix("ollama:") if settings.model.startswith("ollama:") else "")
     return OllamaSummarizer(settings.ollama_url, name) if name else None

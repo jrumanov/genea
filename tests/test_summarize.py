@@ -116,6 +116,24 @@ def test_unreachable_ollama_is_unavailable():
         OllamaSummarizer("http://ollama:11434", "m", client=_client(handler)).summarize(SEGMENTS)
 
 
+def test_read_timeout_is_a_summary_error_not_unavailable():
+    def handler(request):
+        raise httpx.ReadTimeout("slow", request=request)
+
+    summarizer = OllamaSummarizer("http://ollama:11434", "qwen3:14b", timeout=30, client=_client(handler))
+    with pytest.raises(SummaryError, match=r"qwen3:14b.*30 s") as excinfo:
+        summarizer.summarize(SEGMENTS)
+    assert not isinstance(excinfo.value, SummaryUnavailable)
+
+
+def test_connect_timeout_is_unavailable():
+    def handler(request):
+        raise httpx.ConnectTimeout("no route", request=request)
+
+    with pytest.raises(SummaryUnavailable):
+        OllamaSummarizer("http://ollama:11434", "m", client=_client(handler)).summarize(SEGMENTS)
+
+
 def test_empty_transcript_is_a_summary_error():
     with pytest.raises(SummaryError, match="no text"):
         OllamaSummarizer("http://ollama:11434", "m", client=_client(lambda r: _reply({}))).summarize([])
@@ -124,5 +142,6 @@ def test_empty_transcript_is_a_summary_error():
 def test_make_summarizer_model_choice():
     assert make_summarizer(Settings()).model == "qwen3:14b"  # the chat model's name
     assert make_summarizer(Settings(model="ollama:qwen3:8b", summary_model="gemma3:12b")).model == "gemma3:12b"
+    assert make_summarizer(Settings(summary_model="ollama:qwen3:8b")).model == "qwen3:8b"  # same form as `model`
     assert make_summarizer(Settings(model="anthropic:claude-sonnet-5-5")) is None  # no local model to use
     assert make_summarizer(Settings(model="anthropic:claude-sonnet-5-5", summary_model="qwen3:14b")).model == "qwen3:14b"

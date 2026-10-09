@@ -15,6 +15,16 @@ def test_ordinary_text_is_not_a_transcript(text):
     assert not is_transcript(text)
 
 
+def test_year_page_table_is_not_a_transcript():
+    table = "1845\t12\tNarodenie: Ján Novák\n1846\t13\tÚmrtie: Anna Nováková\n1847\t14\tSobáš: Jozef\n"
+    assert not is_transcript(table)
+    assert parse_transcript(table) == []
+
+
+def test_line_ending_before_it_starts_does_not_count():
+    assert not is_transcript("9.000000\t2.000000\t text\n8.000000\t1.000000\t more\n")
+
+
 def test_share_of_matching_lines_decides():
     rows = whisper([(i, i + 1, "x") for i in range(4)])
     assert is_transcript(rows + "a stray line\n")  # 4 of 5 lines

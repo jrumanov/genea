@@ -132,11 +132,16 @@ their time in the recording, and answers cite a moment, like `[podcast_family/20
 `genea index` also asks `summary_model` (through Ollama) for a summary of each recording and of each
 section of about 12,000 characters. Summaries are stored in `.genea/summaries/`, one file per transcript,
 so `index --rebuild` and model changes do not run the LLM again; a summary is made again only when the
-transcript changes or the cache file is deleted and the transcript is re-indexed. Summaries help to find the right recording and moment; the agent is told to
-read the transcript and cite that, never the summary. The first run over many long recordings takes a
-while; `genea index --no-summaries` skips this step, and a later `genea index` fills the summaries in.
-If Ollama is not running, transcripts are still indexed and searchable, and the summaries are retried on
-the next run (`genea status` lists them as `summary pending`).
+transcript changes or the cache file is deleted and the transcript is re-indexed. Summaries help to find
+the right recording and moment; the agent is told to read the transcript and cite that, never the summary.
+The first run over many long recordings takes a while; `genea index --no-summaries` skips this
+step, and a later `genea index` fills the summaries in.
+Ollama must be running for indexing (embeddings use it too). If the summary model fails or times out,
+the transcript is still indexed and searchable, and the summary is retried on the next run (`genea status`
+lists these as `summary pending`).
+
+Upgrading: the index format changed (schema 2). Run `genea index --rebuild --no-summaries` first to make
+everything searchable quickly, then `genea index` to add the summaries (cached ones are reused).
 
 ## Privacy
 
