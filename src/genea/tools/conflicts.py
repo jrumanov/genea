@@ -103,7 +103,7 @@ def _document_mismatches(conn, ged, xref, pid, events, born) -> list[Conflict]:
     if not ranges:
         return []
     passages = conn.execute(
-        "SELECT c.text, c.page, c.chunk_no, f.path FROM links l "
+        "SELECT c.text, c.page, c.chunk_no, c.start_s, f.path FROM links l "
         "JOIN chunks c ON l.source_kind = 'chunk' AND c.id = l.source_id "
         "JOIN files f ON f.id = c.file_id "
         "WHERE l.person_ged_file = ? AND l.person_xref = ? AND l.confidence >= 1.0 "
@@ -112,7 +112,8 @@ def _document_mismatches(conn, ged, xref, pid, events, born) -> list[Conflict]:
     for passage in passages:
         years = sorted({int(y) for y in YEAR_RE.findall(passage["text"])})
         if years and not any(lo <= y <= hi for y in years for lo, hi in ranges):
-            sources = [SourceRef(file=passage["path"], page=passage["page"], chunk=passage["chunk_no"])]
+            sources = [SourceRef(file=passage["path"], page=passage["page"], chunk=passage["chunk_no"],
+                                 start_s=passage["start_s"])]
             if born is not None:
                 sources.append(SourceRef(file=ged, line=born["line_no"]))
             out.append(Conflict(

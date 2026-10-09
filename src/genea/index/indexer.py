@@ -17,12 +17,15 @@ import sqlite_vec
 
 from genea.exiftool import ExifToolError
 from genea.index.db import open_index, set_index_state
+from genea.index import summary_cache
 from genea.index.embed import Embedder
 from genea.index.progress import IndexDbLocked, IndexInUse, IndexLock, IndexProgress, clear_progress, now_iso, write_progress
-from genea.ingest.docs import DOC_EXTS, chunk_pages, extract_document
+from genea.ingest.docs import DOC_EXTS, chunk_pages, chunk_segments, extract_document, read_transcript, summary_chunks
 from genea.ingest.gedcom.mapper import map_gedcom
 from genea.ingest.gedcom.parser import parse_gedcom
 from genea.ingest.images import IMAGE_EXTS, ImageRecord, extract_image, extract_images, sidecar_for
+from genea.ingest.summarize import Summarizer, SummaryUnavailable
+from genea.ingest.transcript import transcript_header
 from genea.kb import KnowledgeBase
 from genea.text import normalize
 
@@ -30,6 +33,9 @@ KIND_BY_EXT = {".ged": "ged", **{e: "doc" for e in DOC_EXTS}, **{e: "image" for 
 EMBED_BATCH = 32
 LOCK_WAIT = 2.0  # seconds: rides out a `genea status` / `genea mcp` probe that holds the lock briefly
 PROGRESS_INTERVAL = 1.0  # seconds between progress file writes within a phase
+SUMMARY_PENDING = "summary pending"  # prefix of files.error_msg for a transcript that still lacks its summary
+NOT_GENERATED = "not generated"
+SUMMARIES_OFF = "summaries disabled"
 
 
 @dataclass
@@ -115,23 +121,35 @@ def _ingest_ged(conn, kb, embedder, path, file_id) -> tuple[str, str | None]:
     return "ok", None
 
 
-def _ingest_doc(conn, kb, embedder, path, file_id) -> tuple[str, str | None]:
+def _ingest_doc(conn, kb, embedder, path, file_id, digest="", pending_reason=NOT_GENERATED) -> tuple[str, str | None]:
     extract = extract_document(path)
     if extract.needs_ocr:
         return "needs_ocr", "no text layer; OCR is needed"
-    chunks = chunk_pages(extract.pages)
+    message = None
+    if extract.segments:  # (chunk, text for FTS and the embedder): the recording's name adds searchable context
+        header = transcript_header(path.stem)
+        chunks = chunk_segments(extract.segments)
+        items = [(c, f"{header}\n{c.text}") for c in chunks]
+        summary = summary_cache.load(kb, digest)
+        if summary is None:
+            message = f"{SUMMARY_PENDING}: {pending_reason}"
+        else:
+            items += [(c, f"{header}\n{c.text}")
+                      for c in summary_chunks(summary, len(chunks), extract.segments[-1].end)]
+    else:
+        items = [(c, c.text) for c in chunk_pages(extract.pages)]
     vectors: list[list[float]] = []
-    for i in range(0, len(chunks), EMBED_BATCH):
-        vectors += embedder.embed([c.text for c in chunks[i:i + EMBED_BATCH]])
-    for chunk, vector in zip(chunks, vectors):
+    for i in range(0, len(items), EMBED_BATCH):
+        vectors += embedder.embed([indexed for _, indexed in items[i:i + EMBED_BATCH]])
+    for (chunk, indexed), vector in zip(items, vectors):
         chunk_id = conn.execute(
-            "INSERT INTO chunks (file_id, page, chunk_no, text) VALUES (?, ?, ?, ?)",
-            (file_id, chunk.page, chunk.chunk_no, chunk.text),
+            "INSERT INTO chunks (file_id, page, chunk_no, text, start_s, end_s, kind) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (file_id, chunk.page, chunk.chunk_no, chunk.text, chunk.start_s, chunk.end_s, chunk.kind),
         ).lastrowid
-        conn.execute("INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)", (chunk_id, chunk.text))
+        conn.execute("INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)", (chunk_id, indexed))
         conn.execute("INSERT INTO chunks_vec (chunk_id, embedding) VALUES (?, ?)",
                      (chunk_id, sqlite_vec.serialize_float32(vector)))
-    return "ok", None
+    return "ok", message
 
 
 def _ingest_image(conn, kb, embedder, path, file_id, record: ImageRecord | None = None) -> tuple[str, str | None]:
@@ -174,7 +192,7 @@ def _record_error(conn, rel, kind, digest, mtime, old_id, exc: Exception, report
 
 
 def _index_one(conn, kb, embedder, path, kind, digest, old_id, report: IndexReport,
-               record: ImageRecord | None = None) -> None:
+               record: ImageRecord | None = None, pending_reason: str = NOT_GENERATED) -> None:
     """`record` is the image's metadata when it was already read (in a batch)."""
     rel = kb.rel(path)
     now = datetime.now().isoformat(timespec="seconds")
@@ -188,7 +206,12 @@ def _index_one(conn, kb, embedder, path, kind, digest, old_id, report: IndexRepo
                 "INSERT INTO files (path, kind, sha256, mtime, indexed_at, status) "
                 "VALUES (?, ?, ?, ?, ?, 'ok')", (rel, kind, digest, mtime, now),
             ).lastrowid
-            extra = {"record": record} if kind == "image" else {}
+            if kind == "image":
+                extra = {"record": record}
+            elif kind == "doc":
+                extra = {"digest": digest, "pending_reason": pending_reason}
+            else:
+                extra = {}
             status, message = INGESTERS[kind](conn, kb, embedder, path, file_id, **extra)
             conn.execute("UPDATE files SET status = ?, error_msg = ? WHERE id = ?", (status, message, file_id))
     except Exception as exc:  # noqa: BLE001 - one bad file must not stop indexing
@@ -230,7 +253,8 @@ def rebuild_links(conn: sqlite3.Connection) -> None:
         for form, conf in name_forms(r["given"], r["surname"], json.loads(r["name_variants"])):
             by_form.setdefault(form, []).append((number, r["ged_file"], r["xref"], conf))
     form_lengths = sorted({len(form.split()) for form in by_form})
-    sources = [("chunk", r["id"], normalize(r["text"])) for r in conn.execute("SELECT id, text FROM chunks")]
+    sources = [("chunk", r["id"], normalize(r["text"])) 
+               for r in conn.execute("SELECT id, text FROM chunks WHERE kind = 'text'")]  # never generated text
     sources += [("image", r["id"], r["search_norm"]) for r in conn.execute("SELECT id, search_norm FROM images")]
     rows = []
     for kind, source_id, text in sources:
@@ -301,13 +325,50 @@ class _Progress:
             self.callback(self.state)
 
 
+def _summary_pending(row) -> bool:
+    return row is not None and (row["error_msg"] or "").startswith(SUMMARY_PENDING)
+
+
+def _summarize_pending(kb: KnowledgeBase, summarizer: Summarizer, pending: list,
+                       progress: _Progress) -> dict[str, str]:
+    """Summarize the pending transcripts that have no cached summary, before any database transaction
+    opens. Returns {path: reason} for the ones that failed; they are indexed without a summary and
+    retried on the next run. When Ollama cannot be reached the remaining ones are not tried at all."""
+    todo = []
+    for path, kind, rel, digest, _old in pending:
+        if kind != "doc" or path.suffix.lower() != ".txt" or summary_cache.load(kb, digest) is not None:
+            continue
+        try:
+            segments = read_transcript(path)
+        except Exception:  # noqa: BLE001 - the indexing step records an unreadable file
+            continue
+        if segments:
+            todo.append((rel, digest, segments))
+    failures: dict[str, str] = {}
+    if not todo:
+        return failures
+    progress.phase("summarizing", total=len(todo))
+    for done, (rel, digest, segments) in enumerate(todo):
+        progress.update(done, rel)
+        try:
+            summary_cache.store(kb, digest, summarizer.summarize(segments), summarizer.model)
+        except SummaryUnavailable as exc:
+            failures.update({r: str(exc) for r, _, _ in todo[done:]})
+            break
+        except Exception as exc:  # noqa: BLE001 - one bad summary must not stop indexing
+            failures[rel] = f"{type(exc).__name__}: {exc}"
+    return failures
+
+
 def index_kb(kb: KnowledgeBase, embedder: Embedder, rebuild: bool = False,
-             on_progress: Callable[[IndexProgress], None] | None = None) -> IndexReport:
+             on_progress: Callable[[IndexProgress], None] | None = None,
+             summarizer: Summarizer | None = None) -> IndexReport:
     """Raises IndexBusy when another run holds the lock, IndexInUse when a rebuild cannot delete the index,
-    and IndexDbLocked when a program that ignores the lock keeps the database locked."""
+    and IndexDbLocked when a program that ignores the lock keeps the database locked. Without a
+    `summarizer` transcripts are indexed without summaries and marked, so a later run adds them."""
     with IndexLock(kb, wait=LOCK_WAIT):
         try:
-            return _index_locked(kb, embedder, rebuild, _Progress(kb, on_progress))
+            return _index_locked(kb, embedder, rebuild, _Progress(kb, on_progress), summarizer)
         except sqlite3.OperationalError as exc:
             if "locked" in str(exc):
                 raise IndexDbLocked() from exc
@@ -316,7 +377,8 @@ def index_kb(kb: KnowledgeBase, embedder: Embedder, rebuild: bool = False,
             clear_progress(kb)
 
 
-def _index_locked(kb: KnowledgeBase, embedder: Embedder, rebuild: bool, progress: _Progress) -> IndexReport:
+def _index_locked(kb: KnowledgeBase, embedder: Embedder, rebuild: bool, progress: _Progress,
+                  summarizer: Summarizer | None) -> IndexReport:
     if rebuild and kb.index_path.exists():
         try:
             kb.index_path.unlink()
@@ -326,7 +388,8 @@ def _index_locked(kb: KnowledgeBase, embedder: Embedder, rebuild: bool, progress
     conn = open_index(kb, embedder)
     try:
         set_index_state(conn, "running")  # stays 'running' if this run dies: seen as interrupted
-        known = {r["path"]: r for r in conn.execute("SELECT id, path, sha256, mtime, status FROM files")}
+        known = {r["path"]: r for r in conn.execute(
+            "SELECT id, path, sha256, mtime, status, error_msg FROM files")}
         seen: set[str] = set()
         pending = []  # (path, kind, rel, digest, old row) of the files that need indexing
         for path, kind in scan_files(kb):
@@ -334,27 +397,31 @@ def _index_locked(kb: KnowledgeBase, embedder: Embedder, rebuild: bool, progress
             seen.add(rel)
             progress.update(len(seen))
             old = known.get(rel)
+            retry = summarizer is not None and _summary_pending(old)  # a transcript still waiting for its summary
             try:
                 mtime = source_mtime(path, kind)
-                if old is not None and old["status"] != "error" and old["mtime"] == mtime:
+                if old is not None and old["status"] != "error" and old["mtime"] == mtime and not retry:
                     report.skipped += 1  # same modification time: trust it, do not read the file
                     continue
                 digest = file_hash(path, kind)
             except Exception as exc:  # noqa: BLE001 - locked, online-only or vanished file
                 _record_error(conn, rel, kind, "", 0.0, old["id"] if old else None, exc, report)
                 continue
-            if old is not None and old["sha256"] == digest and old["status"] != "error":
+            if old is not None and old["sha256"] == digest and old["status"] != "error" and not retry:
                 with conn:  # touched but identical: remember the new time so it is not hashed again
                     conn.execute("UPDATE files SET mtime = ? WHERE id = ?", (mtime, old["id"]))
                 report.skipped += 1
                 continue
             pending.append((path, kind, rel, digest, old))
+        reasons = _summarize_pending(kb, summarizer, pending, progress) if summarizer else {}
+        fallback = NOT_GENERATED if summarizer else SUMMARIES_OFF
         progress.phase("indexing", total=len(pending))
         records = _ImageBatches(kb, [path for path, kind, *_ in pending if kind == "image"])
         for done, (path, kind, rel, digest, old) in enumerate(pending):
             progress.update(done, rel)
             _index_one(conn, kb, embedder, path, kind, digest, old["id"] if old else None, report,
-                       record=records.get(path) if kind == "image" else None)
+                       record=records.get(path) if kind == "image" else None,
+                       pending_reason=reasons.get(rel, fallback))
         for rel, row in known.items():
             if rel not in seen:
                 with conn:

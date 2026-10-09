@@ -18,3 +18,11 @@ def test_mcp_instructions_mention_no_write_tools():
     for word in ("propose_change", "write_note", "genea changes"):
         assert word not in MCP_INSTRUCTIONS
     assert "read-only" in MCP_INSTRUCTIONS
+
+
+def test_summary_hits_are_navigation_not_evidence():
+    for prompt in (SYSTEM_PROMPT, MCP_INSTRUCTIONS):
+        assert 'kind "summary"' in prompt and "Never cite a summary" in prompt
+        assert "@14:20]" in prompt  # how a moment in a recording is cited
+    assert "\n6. Search hits" in SYSTEM_PROMPT
+    assert "\n7. Search hits" in MCP_INSTRUCTIONS

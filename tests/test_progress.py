@@ -98,3 +98,10 @@ def test_index_state_complete_or_legacy_is_ready(empty_kb, tmp_path):
     legacy = init_kb(tmp_path / "legacy")
     _make_db(legacy)  # built before index_state existed
     assert index_state(legacy) == "ready"
+
+
+def test_describe_and_eta_while_summarizing():
+    now = datetime.fromisoformat("2026-10-08T10:10:00")  # 2 of 5 transcripts in 10 minutes
+    progress = _progress(phase="summarizing", done=2, total=5, current="docs/a.txt")
+    assert progress.describe(now) == "summarizing transcripts: 2 / 5, ETA ~15 min, now: docs/a.txt"
+    assert progress.eta_seconds(now) == pytest.approx(15 * 60)

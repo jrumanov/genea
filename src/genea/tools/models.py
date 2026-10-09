@@ -6,18 +6,23 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from genea.ingest.transcript import format_time
+
 
 class SourceRef(BaseModel):
     file: str
     line: int | None = None
     page: int | None = None
     chunk: int | None = None
+    start_s: float | None = None
 
     def cite(self) -> str:
         if self.line is not None:
             return f"[{self.file}:L{self.line}]"
         if self.page is not None:
             return f"[{self.file} p.{self.page}]"
+        if self.start_s is not None:
+            return f"[{self.file} @{format_time(self.start_s)}]"
         return f"[{self.file}]"
 
 
@@ -96,6 +101,9 @@ class Timeline(ToolResult):
 class DocHit(BaseModel):
     file: str
     page: int | None = None
+    start_s: float | None = None
+    end_s: float | None = None
+    kind: str = "text"
     chunk: int
     text: str
     score: float
@@ -111,6 +119,8 @@ class SearchResult(ToolResult):
 class DocumentText(ToolResult):
     file: str
     page: int | None = None
+    start_s: float | None = None
+    next_start_s: float | None = None
     text: str
     truncated: bool
 

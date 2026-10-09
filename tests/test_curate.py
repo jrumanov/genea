@@ -41,7 +41,7 @@ def test_propose_image_change(tools):
     assert stored["target"] == {"kind": "image_xmp", "path": WEDDING}
     sidecar = tools.kb.root / "photos" / "svatba_1932.xmp"
     assert stored["base_hash"] == hashlib.sha256(sidecar.read_bytes()).hexdigest()
-    assert stored["sources"] == [{"file": "tree.ged", "line": 7, "page": None, "chunk": None}]
+    assert stored["sources"] == [{"file": "tree.ged", "line": 7, "page": None, "chunk": None, "start_s": None}]
 
 
 def test_duplicate_is_not_proposed_twice(tools):

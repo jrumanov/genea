@@ -11,6 +11,7 @@ from rich.markup import escape
 from genea.config import KBNotFound
 from genea.index.db import SchemaMismatch
 from genea.index.embed import Embedder, make_embedder
+from genea.ingest.summarize import Summarizer, make_summarizer
 from genea.kb import KnowledgeBase
 from genea.tools.base import ToolContext, open_tools
 
@@ -36,6 +37,10 @@ def open_kb(ctx: typer.Context) -> KnowledgeBase:
 
 def get_embedder(kb: KnowledgeBase) -> Embedder:
     return make_embedder(kb.settings)
+
+
+def get_summarizer(kb: KnowledgeBase) -> Summarizer | None:
+    return make_summarizer(kb.settings)
 
 
 def open_tool_context(kb: KnowledgeBase) -> ToolContext:

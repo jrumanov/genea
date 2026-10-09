@@ -116,13 +116,14 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
 
     @server.tool(structured_output=False)
     async def search_documents(query: str, k: int = 8) -> str:
-        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page."""
+        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page (or, for recordings, the time in the recording)."""
         return run(search.search_documents, query, k)
 
     @server.tool(structured_output=False)
-    async def read_document(path: str, page: int | None = None) -> str:
-        """Read the full text of a document (or one PDF page) found by search_documents."""
-        return run(search.read_document, path, page)
+    async def read_document(path: str, page: int | None = None, start_s: float | None = None) -> str:
+        """Read the full text of a document (or one PDF page) found by search_documents. For a recording
+        transcript give start_s (seconds) to read from that moment; if next_start_s is returned, call again with it."""
+        return run(search.read_document, path, page, start_s)
 
     @server.tool(structured_output=False)
     async def find_images(person: str | None = None, place: str | None = None, year_from: int | None = None,
