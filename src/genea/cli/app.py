@@ -7,6 +7,9 @@ from genea.cli.common import use_utf8_stdout
 app = typer.Typer(no_args_is_help=True, help="Genealogy knowledge-base agent.")
 changes_app = typer.Typer(no_args_is_help=True, help="Review and apply changes proposed by the agent.")
 app.add_typer(changes_app, name="changes")
+summaries_app = typer.Typer(no_args_is_help=True,
+                            help="Have transcripts summarized outside genea, for example by Claude Code.")
+app.add_typer(summaries_app, name="summaries")
 
 
 @app.callback()

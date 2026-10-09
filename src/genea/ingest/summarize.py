@@ -111,6 +111,16 @@ def _strings(data: dict, key: str) -> list[str]:
     return [str(v).strip() for v in value if str(v).strip()] if isinstance(value, list) else []
 
 
+def section_from_answer(data: dict, start_s: float, end_s: float) -> SectionSummary:
+    """A section from a model's JSON answer to SECTION_PROMPT; raises SummaryError without a summary."""
+    return SectionSummary(start_s, end_s, _text(data, "summary"), _strings(data, "topics"),
+                          _strings(data, "people"), _strings(data, "places"), _strings(data, "years"))
+
+
+def overall_from_answer(data: dict) -> str:
+    return _text(data, "overall")
+
+
 class OllamaSummarizer:
     def __init__(self, url: str, model: str, timeout: float = REQUEST_TIMEOUT,
                  client: httpx.Client | None = None, section_chars: int = SECTION_CHARS) -> None:
@@ -127,13 +137,11 @@ class OllamaSummarizer:
         sections = []
         for part in parts:
             data = self._ask(SECTION_PROMPT, " ".join(s.text for s in part))
-            sections.append(SectionSummary(part[0].start, part[-1].end, _text(data, "summary"),
-                                           _strings(data, "topics"), _strings(data, "people"),
-                                           _strings(data, "places"), _strings(data, "years")))
+            sections.append(section_from_answer(data, part[0].start, part[-1].end))
         if len(sections) == 1:
             return Summary(sections[0].summary, sections)
         joined = "\n".join(f"[{format_time(s.start_s)}] {s.summary}" for s in sections)
-        return Summary(_text(self._ask(OVERALL_PROMPT, joined), "overall"), sections)
+        return Summary(overall_from_answer(self._ask(OVERALL_PROMPT, joined)), sections)
 
     def _ask(self, system: str, content: str) -> dict:
         payload = {"model": self.model, "stream": False, "think": False, "format": "json",

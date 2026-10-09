@@ -91,6 +91,7 @@ variable works too.
 |---|---|
 | `genea doctor` | Check ExifTool, Ollama and the models |
 | `genea init` / `index [--rebuild] [--no-summaries]` / `status` | Set up, index, and inspect a knowledge base |
+| `genea summaries pending` / `import [--model M]` | Hand transcript summaries to an outside summarizer (Claude Code) and store its answers |
 | `genea ask "..."` / `chat` | Talk to the agent (`--show-tools` shows its tool calls) |
 | `genea person <name or id>` | Look a person up without the LLM |
 | `genea conflicts [id]` | Rule-based consistency checks without the LLM |
@@ -140,6 +141,13 @@ step, and a later `genea index` fills the summaries in.
 Ollama must be running for indexing (embeddings use it too). If the summary model fails or times out,
 the transcript is still indexed and searchable, and the summary is retried on the next run (`genea status`
 lists these as `summary pending`).
+
+Summaries can also be written outside genea, for example by Claude Code when the local model is too slow:
+`genea summaries pending` writes each transcript without a summary to `.genea/summary-work/` (the text in
+sections, plus `INSTRUCTIONS.md` with the same prompts), the summarizer writes a `<digest>.result.json`
+beside each one, and `genea summaries import` checks and caches them. The next `genea index` adds them,
+even without a `summary_model`. In this repo, ask Claude Code to "summarize pending transcripts" (the
+`summarize-transcripts` skill). This sends the transcripts to Anthropic.
 
 Upgrading: the index format changed (schema 2). Run `genea index --rebuild --no-summaries` first to make
 everything searchable quickly, then `genea index` to add the summaries (cached ones are reused).
