@@ -52,3 +52,15 @@ def test_resolve_errors(tmp_path):
         resolve_kb_root(None)
     with pytest.raises(KBNotFound, match="not found"):
         resolve_kb_root(str(tmp_path / "missing"))
+
+
+def test_transcribe_defaults_and_overrides(isolated_home, tmp_path):
+    s = load_settings(None)
+    assert s.transcribe_model == "medium"
+    assert s.transcribe_language == ""  # empty: auto-detect
+    kb = tmp_path / "kb"
+    (kb / ".genea").mkdir(parents=True)
+    (kb / ".genea" / "config.toml").write_text(
+        'transcribe_model = "large-v3"\ntranscribe_language = "sk"\n', encoding="utf-8")
+    s = load_settings(kb)
+    assert (s.transcribe_model, s.transcribe_language) == ("large-v3", "sk")

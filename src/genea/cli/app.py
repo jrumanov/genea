@@ -10,6 +10,9 @@ app.add_typer(changes_app, name="changes")
 summaries_app = typer.Typer(no_args_is_help=True,
                             help="Have transcripts summarized outside genea, for example by Claude Code.")
 app.add_typer(summaries_app, name="summaries")
+transcripts_app = typer.Typer(no_args_is_help=True,
+                              help="Find and repair recordings whose transcript lost part of the speech.")
+app.add_typer(transcripts_app, name="transcripts")
 
 
 @app.callback()

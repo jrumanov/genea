@@ -18,12 +18,13 @@ dependencies = [
 [project.optional-dependencies]
 cloud = ["pydantic-ai-slim[anthropic]>=2.54"]
 mcp = ["mcp>=2.3"]
+transcribe = ["pywhispercpp>=1.5", "av>=14", "numpy>=2"]
 
 [project.scripts]
 genea = "genea.cli.main:app"
 
 [dependency-groups]
-dev = ["mcp>=2.3", "pillow>=12.0", "pytest>=8.4", "reportlab>=5.0"]
+dev = ["mcp>=2.3", "pillow>=12.0", "pytest>=8.4", "reportlab>=5.0", "av>=14", "numpy>=2"]
 
 [build-system]
 requires = ["hatchling"]
@@ -38,5 +39,5 @@ pythonpath = ["tests"]
 addopts = "-m 'not live'"
 markers = [
     "exiftool: needs the ExifTool binary (skipped automatically when it is missing)",
-    "live: talks to a real Ollama model (run with `uv run pytest -m live`)",
+    "live: uses a real model, Ollama or whisper.cpp (run with `uv run pytest -m live`)",
 ]

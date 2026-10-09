@@ -12,7 +12,7 @@ import docx
 from pypdf import PdfReader
 
 from genea.ingest.summarize import Summary
-from genea.ingest.transcript import Segment, parse_transcript
+from genea.ingest.transcript import Segment, parse_segments, parse_transcript
 
 DOC_EXTS = frozenset({".txt", ".md", ".docx", ".pdf"})
 
@@ -127,6 +127,11 @@ def chunk_pages(pages: list[Page], size: int = 3200, overlap: int = 400) -> list
 def read_transcript(path: Path) -> list[Segment]:
     """Segments of a Whisper transcript file; [] for any other file."""
     return parse_transcript(_read_text_file(path)) if path.suffix.lower() == ".txt" else []
+
+
+def read_raw_transcript(path: Path) -> list[Segment]:
+    """Segments as written, with Whisper loops not collapsed; [] for any other file."""
+    return parse_segments(_read_text_file(path)) if path.suffix.lower() == ".txt" else []
 
 
 PAUSE_SECONDS = 3.0  # silence that makes a good place to cut a chunk
