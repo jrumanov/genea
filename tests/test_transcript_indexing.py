@@ -4,9 +4,11 @@ from dataclasses import replace
 import pytest
 from fixtures.transcripts import NAME, sample_rows, write_transcript
 
+from genea.index import summary_cache
 from genea.index.db import open_index
 from genea.index.embed import FakeEmbedder
-from genea.index.indexer import index_kb
+from genea.index.indexer import SUMMARY_PENDING, index_kb
+from genea.ingest.summarize import FakeSummarizer, SummaryError, SummaryUnavailable
 from genea.kb import KnowledgeBase
 from genea.tool_runner import TRUNCATION_MARKER, run_tool
 from genea.tools.base import ToolError, open_tools
@@ -139,3 +141,160 @@ def test_a_long_ordinary_document_is_not_shrunk_by_the_tool_runner(kb, content):
     body = json.loads(out.text)  # valid JSON with no runner marker: the runner did not have to shrink it
     assert TRUNCATION_MARKER not in out.text and len(out.text) <= kb.settings.tool_output_chars
     assert len(body["text"]) > 5000 and body["text"].endswith("…[truncated]") and body["truncated"] is True
+
+
+def _digest(path):
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _file_row(kb, rel=REL):
+    return _query(kb, "SELECT status, error_msg FROM files WHERE path = ?", (rel,))[0]
+
+
+class Failing(FakeSummarizer):
+    def summarize(self, segments):
+        self.calls += 1
+        raise SummaryError("model exploded")
+
+
+class Down(FakeSummarizer):
+    def summarize(self, segments):
+        self.calls += 1
+        raise SummaryUnavailable("Ollama is not reachable (refused). Is it running?")
+
+
+def test_summary_chunks_are_indexed_and_cached(kb):
+    path = write_transcript(kb.root)
+    fake = FakeSummarizer(section_chars=3000)
+    index_kb(kb, FakeEmbedder(), summarizer=fake)
+    summaries = _chunks(kb, kind="summary")
+    assert len(summaries) == 1 + 3  # the overall summary and one per section (~6,000 characters / 3,000)
+    overall = summaries[0]
+    assert (overall["start_s"], overall["end_s"], overall["page"]) == (0.0, 899.0, None)  # to the last segment's end
+    assert overall["text"].startswith("Zhrnutie (generované): ")
+    assert all(s["end_s"] > s["start_s"] and "rodina" in s["text"] for s in summaries[1:])
+    assert [c["chunk_no"] for c in _chunks(kb) + summaries] == list(range(len(_chunks(kb)) + len(summaries)))
+    assert summary_cache.load(kb, _digest(path)) is not None
+    assert _file_row(kb)["error_msg"] is None
+    chunks = _query(kb, "SELECT COUNT(*) FROM chunks")[0][0]
+    assert _query(kb, "SELECT COUNT(*) FROM chunks_fts")[0][0] == chunks
+    assert _query(kb, "SELECT COUNT(*) FROM chunks_vec")[0][0] == chunks
+
+
+def test_summary_hit_points_to_the_transcript_time(kb):
+    write_transcript(kb.root)
+    index_kb(kb, FakeEmbedder(), summarizer=FakeSummarizer(section_chars=3000))
+    context = open_tools(kb, FakeEmbedder())
+    try:
+        hits = [h for h in search_documents(context, "Súhrn rodine", k=20).hits if h.kind == "summary"]
+    finally:
+        context.conn.close()
+    assert hits and all(h.file == REL for h in hits)
+    assert all(h.source.cite().startswith(f"[{REL} @") for h in hits)
+
+
+def test_an_unchanged_transcript_is_not_summarized_again(kb):
+    write_transcript(kb.root)
+    fake = FakeSummarizer()
+    index_kb(kb, FakeEmbedder(), summarizer=fake)
+    report = index_kb(kb, FakeEmbedder(), summarizer=fake)
+    assert fake.calls == 1 and report.ok == 0
+
+
+def test_rebuild_reuses_the_cache(kb):
+    write_transcript(kb.root)
+    fake = FakeSummarizer()
+    index_kb(kb, FakeEmbedder(), summarizer=fake)
+    index_kb(kb, FakeEmbedder(), rebuild=True, summarizer=fake)
+    assert fake.calls == 1
+    assert _chunks(kb, kind="summary")
+
+
+def test_a_changed_transcript_is_summarized_again(kb):
+    path = write_transcript(kb.root)
+    fake = FakeSummarizer()
+    index_kb(kb, FakeEmbedder(), summarizer=fake)
+    old = _digest(path)
+    write_transcript(kb.root, rows=sample_rows()[:40])
+    index_kb(kb, FakeEmbedder(), summarizer=fake)
+    assert fake.calls == 2 and _digest(path) != old
+    assert "Nahrávka o rodine" in _chunks(kb, kind="summary")[0]["text"]
+    assert _query(kb, "SELECT COUNT(*) FROM chunks_fts")[0][0] == _query(kb, "SELECT COUNT(*) FROM chunks")[0][0]
+
+
+def test_a_failing_summarizer_keeps_the_transcript_searchable_and_is_retried(kb):
+    write_transcript(kb.root)
+    report = index_kb(kb, FakeEmbedder(), summarizer=Failing())
+    row = _file_row(kb)
+    assert row["status"] == "ok" and row["error_msg"] == f"{SUMMARY_PENDING}: SummaryError: model exploded"
+    assert (REL, row["error_msg"]) in report.problems
+    assert _chunks(kb) and not _chunks(kb, kind="summary")
+    fake = FakeSummarizer()
+    report = index_kb(kb, FakeEmbedder(), summarizer=fake)  # unchanged file, but pending: tried again
+    assert fake.calls == 1 and report.ok == 1
+    assert _file_row(kb)["error_msg"] is None and _chunks(kb, kind="summary")
+
+
+def test_without_a_summarizer_the_transcript_is_marked_and_filled_in_later(kb):
+    write_transcript(kb.root)
+    index_kb(kb, FakeEmbedder())
+    assert _file_row(kb)["error_msg"] == f"{SUMMARY_PENDING}: summaries disabled"
+    assert _chunks(kb) and not _chunks(kb, kind="summary")
+    index_kb(kb, FakeEmbedder())  # still no summarizer: nothing to retry, the file is skipped
+    fake = FakeSummarizer()
+    index_kb(kb, FakeEmbedder(), summarizer=fake)
+    assert fake.calls == 1 and _file_row(kb)["error_msg"] is None
+
+
+def test_ollama_down_stops_after_the_first_transcript(kb):
+    for number in (1, 2, 3):
+        write_transcript(kb.root, f"2023_01_0{number}-rozhovor.txt")
+    down = Down()
+    report = index_kb(kb, FakeEmbedder(), summarizer=down)
+    assert down.calls == 1  # not one timeout per recording
+    assert report.errors == 0
+    for number in (1, 2, 3):
+        row = _file_row(kb, f"docs/2023_01_0{number}-rozhovor.txt")
+        assert row["status"] == "ok" and "not reachable" in row["error_msg"]
+        assert _chunks(kb, f"docs/2023_01_0{number}-rozhovor.txt")
+
+
+def test_ordinary_text_is_never_summarized(kb):
+    fake = FakeSummarizer()
+    index_kb(kb, FakeEmbedder(), summarizer=fake)
+    assert fake.calls == 0
+    assert not _query(kb, "SELECT 1 FROM files WHERE error_msg LIKE 'summary pending%'")
+
+
+JOSEF_ROW = (0.0, 5.0, "Josef Novák odišiel v roku 1700 do sveta.")  # a year that matches none of his events
+
+
+def _links_by_kind(kb):
+    return {r["kind"]: r["n"] for r in _query(
+        kb, "SELECT c.kind, COUNT(*) AS n FROM links l JOIN chunks c ON l.source_kind = 'chunk' "
+            "AND c.id = l.source_id JOIN files f ON f.id = c.file_id WHERE f.path = ? GROUP BY c.kind", (REL,))}
+
+
+def test_summary_chunks_link_no_people(kb):
+    write_transcript(kb.root, rows=[JOSEF_ROW, *sample_rows()[1:]])
+    index_kb(kb, FakeEmbedder(), summarizer=FakeSummarizer())  # the fake summary repeats "Josef Novák"
+    assert "Josef Novák" in _chunks(kb, kind="summary")[1]["text"]
+    kinds = _links_by_kind(kb)
+    assert kinds.get("text") and "summary" not in kinds  # only the transcript itself links people
+
+
+def test_a_transcript_mismatch_cites_the_moment(kb):
+    from genea.tools.conflicts import find_conflicts
+
+    write_transcript(kb.root, rows=[JOSEF_ROW, *sample_rows()[1:]])
+    index_kb(kb, FakeEmbedder(), summarizer=FakeSummarizer())
+    context = open_tools(kb, FakeEmbedder())
+    try:
+        found = [c for c in find_conflicts(context).conflicts
+                 if c.kind == "document_mismatch" and c.sources[0].file == REL]
+    finally:
+        context.conn.close()
+    assert found  # from the transcript text, not from the summary
+    assert all(c.sources[0].cite() == f"[{REL} @0:00]" for c in found)

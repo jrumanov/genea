@@ -8,6 +8,7 @@ from pathlib import Path
 import docx
 from pypdf import PdfReader
 
+from genea.ingest.summarize import Summary
 from genea.ingest.transcript import Segment, parse_transcript
 
 DOC_EXTS = frozenset({".txt", ".md", ".docx", ".pdf"})
@@ -125,4 +126,20 @@ def chunk_segments(segments: list[Segment], size: int = 3200, overlap_segments: 
         if end >= n:
             break
         start = max(end - overlap_segments, start + 1)
+    return chunks
+
+
+SUMMARY_LABEL = "Zhrnutie (generované)"
+
+
+def summary_chunks(summary: Summary, first_no: int, duration: float) -> list[Chunk]:
+    """A generated summary as chunks of kind 'summary': the overall one spans the whole recording, the
+    others a section each. They say where to look; they are never evidence."""
+    chunks = [Chunk(None, first_no, f"{SUMMARY_LABEL}: {summary.overall}", 0.0, duration, "summary")]
+    for section in summary.sections:
+        extras = [f"{label}: {', '.join(values)}"
+                  for label, values in (("Témy", section.topics), ("Osoby", section.people),
+                                        ("Miesta", section.places), ("Roky", section.years)) if values]
+        text = " ".join([f"{SUMMARY_LABEL}: {section.summary}", *extras])
+        chunks.append(Chunk(None, first_no + len(chunks), text, section.start_s, section.end_s, "summary"))
     return chunks
