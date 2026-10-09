@@ -1,9 +1,11 @@
 import sqlite3
 
+from fixtures.transcripts import write_transcript
 from typer.testing import CliRunner
 
 from genea.cli.main import app
 from genea.index.embed import FakeEmbedder
+from genea.ingest.summarize import FakeSummarizer
 from genea.index.progress import IndexLock, IndexProgress, now_iso, write_progress
 from genea.kb import KnowledgeBase
 
@@ -83,3 +85,29 @@ def test_index_explains_a_locked_database(sample_root, monkeypatch):
     assert result.exit_code == 1
     assert "another program" in result.output
     assert "Traceback" not in result.output
+
+
+def test_index_summarizes_transcripts_unless_told_not_to(sample_root, monkeypatch):
+    _prepare(sample_root, monkeypatch)
+    write_transcript(sample_root)
+    fake = FakeSummarizer()
+    monkeypatch.setattr("genea.cli.common.get_summarizer", lambda kb: fake)
+
+    result = runner.invoke(app, ["--kb", str(sample_root), "index", "--no-summaries"])
+    assert result.exit_code == 0, result.output
+    assert fake.calls == 0
+    status = runner.invoke(app, ["--kb", str(sample_root), "status"])
+    assert "disabled" in status.output  # single words: rich may wrap a longer phrase across lines
+
+    result = runner.invoke(app, ["--kb", str(sample_root), "index"])
+    assert result.exit_code == 0, result.output
+    assert fake.calls == 1
+    assert "pending" not in runner.invoke(app, ["--kb", str(sample_root), "status"]).output
+
+
+def test_index_says_when_there_is_no_model_for_summaries(sample_root, monkeypatch):
+    _prepare(sample_root, monkeypatch)
+    monkeypatch.setattr("genea.cli.common.get_summarizer", lambda kb: None)
+    result = runner.invoke(app, ["--kb", str(sample_root), "index"])
+    assert result.exit_code == 0, result.output
+    assert "summary_model" in result.output

@@ -65,7 +65,7 @@ def _duration(seconds: float) -> str:
 class IndexProgress:
     pid: int
     started_at: str
-    phase: Literal["scanning", "indexing", "linking"]
+    phase: Literal["scanning", "indexing", "summarizing", "linking"]
     phase_started_at: str
     updated_at: str
     done: int = 0
@@ -73,7 +73,7 @@ class IndexProgress:
     current: str | None = None
 
     def eta_seconds(self, now: datetime | None = None) -> float | None:
-        if self.phase != "indexing" or self.done <= 0 or self.done >= self.total:
+        if self.phase not in ("indexing", "summarizing") or self.done <= 0 or self.done >= self.total:
             return None
         elapsed = ((now or datetime.now()) - datetime.fromisoformat(self.phase_started_at)).total_seconds()
         return max(elapsed, 0.0) / self.done * (self.total - self.done)
@@ -83,7 +83,10 @@ class IndexProgress:
             return f"scanning files ({self.done} found)"
         if self.phase == "linking":
             return "linking people to documents and photos (almost done)"
-        text = f"{self.done} / {self.total} files ({self.done * 100 // max(self.total, 1)} %)"
+        if self.phase == "summarizing":
+            text = f"summarizing transcripts: {self.done} / {self.total}"
+        else:
+            text = f"{self.done} / {self.total} files ({self.done * 100 // max(self.total, 1)} %)"
         eta = self.eta_seconds(now)
         if eta is not None:
             text += f", ETA {_duration(eta)}"

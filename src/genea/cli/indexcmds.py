@@ -26,9 +26,15 @@ def _short(rel: str | None) -> str:
 def index(
     ctx: typer.Context,
     rebuild: bool = typer.Option(False, "--rebuild", help="Delete the index and build it from scratch."),
+    no_summaries: bool = typer.Option(False, "--no-summaries",
+                                      help="Do not summarize transcripts in this run (a later run adds them)."),
 ) -> None:
     """Index new and changed files of the knowledge base."""
     kb = common.open_kb(ctx)
+    summarizer = None if no_summaries else common.get_summarizer(kb)
+    if summarizer is None and not no_summaries:
+        common.console.print("[yellow]Transcript summaries are off: set summary_model in config.toml "
+                             "(an Ollama model name).[/yellow]")
     columns = (SpinnerColumn(), TextColumn("{task.description}"), BarColumn(), MofNCompleteColumn(),
                TimeRemainingColumn())
     with Progress(*columns, console=common.console, transient=True) as bar:
@@ -39,11 +45,14 @@ def index(
                 bar.update(task, description=f"scanning ({p.done} files)")
             elif p.phase == "indexing":
                 bar.update(task, total=p.total, completed=p.done, description=escape(_short(p.current)))
+            elif p.phase == "summarizing":
+                bar.update(task, total=p.total, completed=p.done, description="summarizing " + escape(_short(p.current)))
             else:
                 bar.update(task, total=None, completed=0, description="linking people to documents and photos")
 
         try:
-            report = index_kb(kb, common.get_embedder(kb), rebuild=rebuild, on_progress=show)
+            report = index_kb(kb, common.get_embedder(kb), rebuild=rebuild, on_progress=show,
+                              summarizer=summarizer)
         except (SchemaMismatch, IndexBusy, IndexInUse, IndexDbLocked) as exc:
             bar.stop()
             common.console.print(f"[red]{escape(str(exc))}[/red]")

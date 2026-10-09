@@ -298,3 +298,27 @@ def test_a_transcript_mismatch_cites_the_moment(kb):
         context.conn.close()
     assert found  # from the transcript text, not from the summary
     assert all(c.sources[0].cite() == f"[{REL} @0:00]" for c in found)
+
+
+def test_summarizing_is_a_progress_phase_before_indexing(kb):
+    from genea.index.progress import read_progress
+
+    write_transcript(kb.root)
+    seen = []
+
+    def record(progress):
+        on_disk = read_progress(kb)
+        seen.append((progress.phase, progress.done, progress.total, progress.current, on_disk and on_disk.phase))
+
+    index_kb(kb, FakeEmbedder(), on_progress=record, summarizer=FakeSummarizer())
+    phases = [phase for phase, *_ in seen]
+    assert phases.index("scanning") < phases.index("summarizing") < phases.index("indexing") < phases.index("linking")
+    summarizing = [(d, t, c) for phase, d, t, c, _ in seen if phase == "summarizing"]
+    assert summarizing[0] == (0, 1, None) and (0, 1, REL) in summarizing  # the phase starts, then names the file
+    assert all(phase == disk for phase, _, _, _, disk in seen if phase != "scanning")
+
+
+def test_no_summarizing_phase_when_nothing_needs_a_summary(kb):
+    seen = []
+    index_kb(kb, FakeEmbedder(), on_progress=lambda p: seen.append(p.phase), summarizer=FakeSummarizer())
+    assert "summarizing" not in seen
