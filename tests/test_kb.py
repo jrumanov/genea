@@ -3,7 +3,7 @@ import pytest
 from genea.kb import KnowledgeBase, init_kb
 
 SUBDIRS = ["notes", "changes/pending", "changes/applied", "changes/rejected",
-           "changes/stale", "backups", "logs", "exports"]
+           "changes/stale", "backups", "logs", "exports", "summaries"]
 
 
 def test_init_creates_layout(tmp_path):

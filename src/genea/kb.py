@@ -15,7 +15,7 @@ DEFAULT_KB_CONFIG = """\
 """
 
 SUBDIRS = ("notes", "changes/pending", "changes/applied", "changes/rejected",
-           "changes/stale", "backups", "logs", "exports")
+           "changes/stale", "backups", "logs", "exports", "summaries")
 
 
 @dataclass(frozen=True)
@@ -57,6 +57,10 @@ class KnowledgeBase:
     @property
     def exports_dir(self) -> Path:
         return self.meta_dir / "exports"
+
+    @property
+    def summaries_dir(self) -> Path:
+        return self.meta_dir / "summaries"
 
     def ensure_dirs(self) -> None:
         for sub in SUBDIRS:
