@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from fixtures.make_kb import damage_pdf
 from genea.index.db import SchemaMismatch, open_index
 from genea.index.embed import FakeEmbedder
 from genea.index.indexer import index_kb, name_forms, scan_files, source_mtime
@@ -398,3 +399,13 @@ def test_database_locked_by_another_writer_is_explained(kb, monkeypatch):
     finally:
         other.close()
     assert is_index_running(kb) is False
+
+
+def test_damaged_pdf_is_indexed_and_named_in_problems(kb):
+    damage_pdf(kb.root / "docs" / "matrika.pdf")
+    report = index_kb(kb, FakeEmbedder())
+    assert report.errors == 0
+    messages = dict(report.problems)
+    assert messages["docs/matrika.pdf"].startswith("damaged PDF")
+    row = _query(kb, "SELECT status, error_msg FROM files WHERE path = 'docs/matrika.pdf'")[0]
+    assert (row["status"], row["error_msg"]) == ("ok", messages["docs/matrika.pdf"])

@@ -123,9 +123,11 @@ def _ingest_ged(conn, kb, embedder, path, file_id) -> tuple[str, str | None]:
 
 def _ingest_doc(conn, kb, embedder, path, file_id, digest="", pending_reason=NOT_GENERATED) -> tuple[str, str | None]:
     extract = extract_document(path)
+    damage = (f"damaged PDF, read with {len(extract.warnings)} repair warning(s); first: {extract.warnings[0]}"
+              if extract.warnings else None)
     if extract.needs_ocr:
-        return "needs_ocr", "no text layer; OCR is needed"
-    message = None
+        return "needs_ocr", "no text layer; OCR is needed" + (f" ({damage})" if damage else "")
+    message = damage
     if extract.segments:  # (chunk, text for FTS and the embedder): the recording's name adds searchable context
         header = transcript_header(path.stem)
         chunks = chunk_segments(extract.segments)

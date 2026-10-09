@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -80,3 +81,8 @@ def build_sample_kb(root: Path) -> Path:
     image.save(photos / "anna_1935.jpg", exif=exif)
     Image.new("RGB", (16, 16), "blue").save(photos / "dum.jpg")
     return root
+
+
+def damage_pdf(path: Path) -> None:
+    """Point every xref entry at offset 0, like the broken PDFs pypdf repairs with 'wrong pointing object'."""
+    path.write_bytes(re.sub(rb"\d{10} 00000 n", b"0000000000 00000 n", path.read_bytes()))

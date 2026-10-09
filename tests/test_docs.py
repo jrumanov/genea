@@ -1,5 +1,6 @@
 import pytest
 
+from fixtures.make_kb import damage_pdf
 from genea.ingest.docs import Chunk, Page, chunk_pages, extract_document
 
 
@@ -22,6 +23,19 @@ def test_scanned_pdf_needs_ocr(sample_root):
     scan = extract_document(sample_root / "docs" / "sken.pdf")
     assert scan.needs_ocr
     assert scan.pages == []
+
+
+def test_damaged_pdf_keeps_text_and_collects_warnings(sample_root, capsys):
+    path = sample_root / "docs" / "matrika.pdf"
+    damage_pdf(path)
+    pdf = extract_document(path)
+    assert "Vaclav Novak" in pdf.pages[1].text
+    assert any("wrong pointing object" in w for w in pdf.warnings)
+    assert capsys.readouterr().err == ""  # collected, not printed over the progress bar
+
+
+def test_intact_pdf_has_no_warnings(sample_root):
+    assert extract_document(sample_root / "docs" / "matrika.pdf").warnings == []
 
 
 def test_cp1250_text_fallback(tmp_path):
