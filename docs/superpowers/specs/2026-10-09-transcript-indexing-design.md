@@ -133,14 +133,20 @@ Evidence rule (`agent/prompt.py`), a new rule 7 for both the agent and MCP promp
 To enforce this in the tool output, a summary hit's `source` points at the transcript with `start_s` of the
 section, so the only citation the agent can copy is the transcript timestamp.
 
-Links: `rebuild_links` already runs over all chunks, so summary chunks get person links too. Consequence:
-`find_person` style lookups can surface a recording whose summary names a person. Accepted.
+Links: `rebuild_links` reads only `kind = 'text'` chunks, so summaries never link people. (An earlier draft
+accepted summary links; that was wrong: `find_conflicts` treats the years in linked passages as document
+evidence, so an LLM-written year could be reported as a document mismatch.) Conflicts found in a transcript
+passage cite its moment.
 
 ## Details settled while planning
 
 - `read_document` on a transcript also returns `next_start_s` (the start of the first segment that did not fit),
-  so a model can continue reading without parsing the text. The window is `tool_output_chars` minus 800
-  characters for the JSON around it; otherwise the tool runner would shrink a long window to 2,000 characters.
+  so a model can continue reading without parsing the text. The window is `tool_output_chars` minus 600
+  characters for the other fields, measured as escaped JSON; otherwise the tool runner would shrink a long
+  window to 2,000 characters. The same budget is applied to ordinary documents, which today hit exactly that
+  bug (a 32,000-character `.txt` reaches the model as 2,001 characters).
+- The Ollama request sets `num_ctx` to 8192: a 12,000-character section is ~4-5k tokens, and Ollama's default
+  context window may be smaller, which would silently cut the section.
 - When Ollama cannot be reached (`SummaryUnavailable`), the remaining transcripts of the run are not tried;
   they are indexed without summaries and marked `summary pending` with the reason.
 - `summary_model` is a plain Ollama model name (no `ollama:` prefix). If it is empty and the chat model is not

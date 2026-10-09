@@ -25,10 +25,12 @@
 
 ## Review Focus
 
-Inputs and failures the spec implies but a user would hit; each has a test in the named task.
+Inputs and failures the spec implies but a user would hit; each has a test in the named task. Items 6 and 7 came from the second review.
 
 1. Ollama is down while 45 transcripts are pending: the run must stop after the first connection failure, not wait out 45 timeouts, and every transcript must still be searchable (Task 7).
-2. A long transcript read through `run_tool` must not be shrunk to 2,000 characters by `render()`; the window has to fit `tool_output_chars` including the JSON wrapper (Task 4).
+2. A long transcript, or any long document, read through `run_tool` must not be shrunk to 2,000 characters by `render()`; the text has to fit `tool_output_chars` measured as escaped JSON, with room for the other fields. Today an ordinary 32,000-character `.txt` reaches the model as 2,001 characters (measured); Task 4 fixes that too (Task 4).
+6. Generated summary text must never become evidence: no person links from summary chunks, so `find_conflicts` cannot report a "document mismatch" from a year the LLM wrote (Task 7).
+7. Ollama's default context window can be smaller than a 12,000-character section; the request must set `num_ctx`, or the model silently sees only the start of the section (Task 5).
 3. `start_s = 0` is falsy: a hit or a read at the very start must cite `@0:00`, not drop the timestamp (Task 4).
 4. A transcript saved by Windows tools with CRLF line endings (and possibly a UTF-8 BOM) must parse like any other (Tasks 1 and 2).
 5. A summarizer that returns malformed JSON, or a cache file that is corrupt or from an older `SUMMARY_VERSION`, must degrade to "no summary yet" and never raise out of `genea index` (Tasks 5, 6 and 7).
@@ -596,9 +598,9 @@ EOF
 
 **Files:**
 - Modify: `src/genea/tools/models.py` (`SourceRef`, `DocHit`, `DocumentText`)
-- Modify: `src/genea/tools/search.py` (`search_documents`, `read_document`)
+- Modify: `src/genea/tools/search.py` (`search_documents`, `read_document`, text budget for all documents)
 - Modify: `src/genea/agent/core.py`, `src/genea/mcp_server.py` (`read_document` wrappers)
-- Modify: `tests/test_mcp_server.py` (read_document case)
+- Modify: `tests/test_mcp_server.py` (read_document case), `tests/test_search.py` (`test_read_document_truncates` limit)
 - Modify: `tests/test_transcript_indexing.py` (append)
 
 **Interfaces:**
@@ -666,9 +668,10 @@ def test_read_transcript_from_a_moment(ctx):
 def test_read_transcript_window_continues_where_it_stopped(ctx):
     small = KnowledgeBase(ctx.kb.root, replace(ctx.kb.settings, tool_output_chars=1200))
     first = read_document(replace(ctx, kb=small), REL)
-    assert first.truncated and first.next_start_s == 45.0  # three 15 s segments fit the window
+    # budget 1200 - 600 = 600; each line costs 108 characters of JSON, so five 15 s segments fit
+    assert first.truncated and first.next_start_s == 75.0
     second = read_document(replace(ctx, kb=small), REL, start_s=first.next_start_s)
-    assert second.text.startswith("[0:45]")
+    assert second.text.startswith("[1:15]")
 
 
 def test_read_transcript_refuses_wrong_arguments(ctx):
@@ -692,6 +695,21 @@ def test_a_long_transcript_window_is_not_shrunk_by_the_tool_runner(kb):
     assert TRUNCATION_MARKER not in out.text and len(out.text) <= kb.settings.tool_output_chars
     assert len(body["text"]) > 9000
     assert body["truncated"] is True and body["next_start_s"] > 0
+
+
+@pytest.mark.parametrize("content", ["Slovo o rodine. " * 2000,  # 32,000 characters of plain text
+                                     'Povedal "áno" a odišiel.\n' * 1500])  # quotes and newlines cost double in JSON
+def test_a_long_ordinary_document_is_not_shrunk_by_the_tool_runner(kb, content):
+    (kb.root / "docs" / "long.txt").write_text(content, encoding="utf-8")
+    index_kb(kb, FakeEmbedder())
+    context = open_tools(kb, FakeEmbedder())
+    try:
+        out = run_tool(context, read_document, "docs/long.txt")
+    finally:
+        context.conn.close()
+    body = json.loads(out.text)  # valid JSON with no runner marker: the runner did not have to shrink it
+    assert TRUNCATION_MARKER not in out.text and len(out.text) <= kb.settings.tool_output_chars
+    assert len(body["text"]) > 5000 and body["text"].endswith("…[truncated]") and body["truncated"] is True
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -738,7 +756,30 @@ Extend `DocHit` with `start_s: float | None = None`, `end_s: float | None = None
 Replace `read_document` and add the transcript reader above it:
 
 ```python
-TRANSCRIPT_OVERHEAD = 800  # characters kept free in tool_output_chars for the JSON around a transcript window
+RESULT_OVERHEAD = 600  # characters of tool_output_chars kept for the other fields of a DocumentText
+TRUNCATED = "\n…[truncated]"
+
+
+def _json_len(text: str) -> int:
+    """Characters `text` takes inside the tool's JSON output (quotes, backslashes and newlines are escaped)."""
+    return len(json.dumps(text, ensure_ascii=False)) - 2
+
+
+def _text_budget(ctx: ToolContext) -> int:
+    """Document text larger than this would make the result exceed tool_output_chars, and the tool runner
+    would then cut every string to 2,000 characters."""
+    return max(ctx.kb.settings.tool_output_chars - RESULT_OVERHEAD, 200)
+
+
+def _fit(text: str, budget: int) -> tuple[str, bool]:
+    """The longest prefix of `text` (plus the truncation marker) whose escaped form fits `budget`."""
+    if _json_len(text) <= budget:
+        return text, False
+    room = budget - _json_len(TRUNCATED)
+    cut = text[:room]
+    while cut and _json_len(cut) > room:
+        cut = cut[:len(cut) - max(1, _json_len(cut) - room)]
+    return cut + TRUNCATED, True
 
 
 def _read_transcript(ctx: ToolContext, rel: str, segments: list[Segment], page: int | None,
@@ -749,19 +790,20 @@ def _read_transcript(ctx: ToolContext, rel: str, segments: list[Segment], page: 
     duration = max(s.end for s in segments)
     if start < 0 or start >= duration:
         raise ToolError(f"start_s must be between 0 and {duration:.0f} (the length of the recording in seconds)")
-    budget = max(ctx.kb.settings.tool_output_chars - TRANSCRIPT_OVERHEAD, 200)
+    budget = _text_budget(ctx)
     lines: list[str] = []
     used, first, next_start = 0, None, None
     for seg in segments:
         if seg.end <= start:
             continue
         line = f"[{format_time(seg.start)}] {seg.text}"
-        if lines and used + len(line) + 1 > budget:
+        cost = _json_len(line) + 2  # the line and its escaped newline
+        if lines and used + cost > budget:
             next_start = seg.start
             break
         first = seg.start if first is None else first
         lines.append(line)
-        used += len(line) + 1
+        used += cost
     return DocumentText(file=rel, start_s=first, next_start_s=next_start, text="\n".join(lines),
                         truncated=next_start is not None, sources=[SourceRef(file=rel, start_s=first)])
 
@@ -784,13 +826,12 @@ def read_document(ctx: ToolContext, path: str, page: int | None = None,
     if page is not None and not pages:
         raise ToolError(f"Page {page} was not found or has no text in {path}")
     text = "\n\n".join((f"[page {p.number}]\n" if p.number else "") + p.text for p in pages)
-    limit = ctx.kb.settings.tool_output_chars
-    truncated = len(text) > limit
-    if truncated:
-        text = text[:limit] + "\n…[truncated]"
+    text, truncated = _fit(text, _text_budget(ctx))  # before: text[:limit] overflowed and was cut to 2,000
     return DocumentText(file=rel, page=page, text=text, truncated=truncated,
                         sources=[SourceRef(file=rel, page=page)])
 ```
+
+`search.py` already imports `json`.
 
 `src/genea/agent/core.py` and `src/genea/mcp_server.py`: replace the `read_document` wrappers. The two docstrings must be identical (a test compares them).
 
@@ -817,7 +858,7 @@ Also change the `search_documents` docstring in both files to end with
 - [ ] **Step 4: Run the whole suite to verify it passes**
 
 Run: `uv run pytest -q`
-Expected: PASS. If `test_a_long_transcript_window_is_not_shrunk_by_the_tool_runner` fails on `len(out.text) <= 12000`, raise `TRANSCRIPT_OVERHEAD` until it passes; the point of the test is that `render()` must not cut the text.
+Expected: PASS, after one change to an existing test: in `tests/test_search.py::test_read_document_truncates` replace `tool_output_chars=20` with `tool_output_chars=650`. With 20 the text budget is its floor of 200 characters, larger than the short chronicle, so nothing would be truncated; 650 gives a budget of 50.
 
 - [ ] **Step 5: Commit**
 
@@ -915,6 +956,7 @@ def test_ollama_summarizer_one_section():
     summary = summarizer.summarize(SEGMENTS)
     assert len(seen) == 1  # one section needs no second pass
     assert seen[0]["model"] == "qwen3:14b" and seen[0]["think"] is False and seen[0]["format"] == "json"
+    assert seen[0]["options"]["num_ctx"] >= 8192  # Ollama's default window can be smaller than one section
     assert seen[0]["messages"][1]["content"] == " ".join(s.text for s in SEGMENTS)
     assert summary.overall == "Rozprávanie o babke."
     assert summary.sections == [SectionSummary(0, 30, "Rozprávanie o babke.", ["rodina"], ["babka Fábiková"],
@@ -1008,6 +1050,7 @@ from genea.config import Settings
 from genea.ingest.transcript import Segment, format_time
 
 SECTION_CHARS = 12000
+NUM_CTX = 8192  # tokens: a 12,000-character Slovak section is ~4-5k tokens, and Ollama's default window may be smaller
 REQUEST_TIMEOUT = 600.0  # seconds: a local model can need minutes for one section
 
 SECTION_PROMPT = """\
@@ -1132,7 +1175,7 @@ class OllamaSummarizer:
 
     def _ask(self, system: str, content: str) -> dict:
         payload = {"model": self.model, "stream": False, "think": False, "format": "json",
-                   "options": {"temperature": 0},
+                   "options": {"temperature": 0, "num_ctx": NUM_CTX},
                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}]}
         try:
             response = self.client.post(f"{self.url}/api/chat", json=payload, timeout=self.timeout)
@@ -1318,12 +1361,13 @@ EOF
 
 **Files:**
 - Modify: `src/genea/ingest/docs.py` (`summary_chunks`)
-- Modify: `src/genea/index/indexer.py` (`_ingest_doc`, `_index_one`, `_index_locked`, `index_kb`, `_summarize_pending`)
+- Modify: `src/genea/index/indexer.py` (`_ingest_doc`, `_index_one`, `_index_locked`, `index_kb`, `_summarize_pending`, `rebuild_links`)
+- Modify: `src/genea/tools/conflicts.py` (`_document_mismatches`: cite the moment of a transcript passage)
 - Modify: `tests/test_transcript_indexing.py` (append)
 
 **Interfaces:**
 - Consumes: `FakeSummarizer`, `Summary`, `SummaryError`, `SummaryUnavailable` (Task 5); `summary_cache.load/store` (Task 6); `read_transcript` (Task 2).
-- Produces: `summary_chunks(summary, first_no, duration) -> list[Chunk]`; `index_kb(kb, embedder, rebuild=False, on_progress=None, summarizer=None)`; constants `SUMMARY_PENDING = "summary pending"` in `indexer`; a transcript without a cached summary is stored with `files.error_msg = "summary pending: <reason>"`; `progress.phase("summarizing", total=n)` with `current` = the transcript path.
+- Produces: `summary_chunks(summary, first_no, duration) -> list[Chunk]`; `index_kb(kb, embedder, rebuild=False, on_progress=None, summarizer=None)`; constants `SUMMARY_PENDING = "summary pending"` in `indexer`; a transcript without a cached summary is stored with `files.error_msg = "summary pending: <reason>"`; `progress.phase("summarizing", total=n)` with `current` = the transcript path; `rebuild_links` reads only `kind = 'text'` chunks; transcript conflicts cite `[file @m:ss]`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1461,6 +1505,38 @@ def test_ordinary_text_is_never_summarized(kb):
     index_kb(kb, FakeEmbedder(), summarizer=fake)
     assert fake.calls == 0
     assert not _query(kb, "SELECT 1 FROM files WHERE error_msg LIKE 'summary pending%'")
+
+
+JOSEF_ROW = (0.0, 5.0, "Josef Novák odišiel v roku 1700 do sveta.")  # a year that matches none of his events
+
+
+def _links_by_kind(kb):
+    return {r["kind"]: r["n"] for r in _query(
+        kb, "SELECT c.kind, COUNT(*) AS n FROM links l JOIN chunks c ON l.source_kind = 'chunk' "
+            "AND c.id = l.source_id JOIN files f ON f.id = c.file_id WHERE f.path = ? GROUP BY c.kind", (REL,))}
+
+
+def test_summary_chunks_link_no_people(kb):
+    write_transcript(kb.root, rows=[JOSEF_ROW, *sample_rows()[1:]])
+    index_kb(kb, FakeEmbedder(), summarizer=FakeSummarizer())  # the fake summary repeats "Josef Novák"
+    assert "Josef Novák" in _chunks(kb, kind="summary")[1]["text"]
+    kinds = _links_by_kind(kb)
+    assert kinds.get("text") and "summary" not in kinds  # only the transcript itself links people
+
+
+def test_a_transcript_mismatch_cites_the_moment(kb):
+    from genea.tools.conflicts import find_conflicts
+
+    write_transcript(kb.root, rows=[JOSEF_ROW, *sample_rows()[1:]])
+    index_kb(kb, FakeEmbedder(), summarizer=FakeSummarizer())
+    context = open_tools(kb, FakeEmbedder())
+    try:
+        found = [c for c in find_conflicts(context).conflicts
+                 if c.kind == "document_mismatch" and c.sources[0].file == REL]
+    finally:
+        context.conn.close()
+    assert found  # from the transcript text, not from the summary
+    assert all(c.sources[0].cite() == f"[{REL} @0:00]" for c in found)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1670,12 +1746,37 @@ def _index_locked(kb: KnowledgeBase, embedder: Embedder, rebuild: bool, progress
     return report
 ```
 
-- [ ] **Step 5: Run the whole suite to verify it passes**
+In `rebuild_links`, link people only from transcript and document text, never from generated summaries. Change the chunk source query:
+
+```python
+    sources = [("chunk", r["id"], normalize(r["text"]))
+               for r in conn.execute("SELECT id, text FROM chunks WHERE kind = 'text'")]  # never generated text
+```
+
+- [ ] **Step 5: Cite the moment in transcript conflicts**
+
+In `src/genea/tools/conflicts.py::_document_mismatches`, select `c.start_s` and pass it to the source:
+
+```python
+    passages = conn.execute(
+        "SELECT c.text, c.page, c.chunk_no, c.start_s, f.path FROM links l "
+        "JOIN chunks c ON l.source_kind = 'chunk' AND c.id = l.source_id "
+        "JOIN files f ON f.id = c.file_id "
+        "WHERE l.person_ged_file = ? AND l.person_xref = ? AND l.confidence >= 1.0 "
+        "ORDER BY f.path, c.chunk_no", (ged, xref)).fetchall()
+```
+
+```python
+            sources = [SourceRef(file=passage["path"], page=passage["page"], chunk=passage["chunk_no"],
+                                 start_s=passage["start_s"])]
+```
+
+- [ ] **Step 6: Run the whole suite to verify it passes**
 
 Run: `uv run pytest -q`
-Expected: PASS (existing indexer, search and progress tests too: `FakeEmbedder`-only runs pass no summarizer, and the sample KB has no transcript)
+Expected: PASS (existing indexer, search, links, conflicts and progress tests too: `FakeEmbedder`-only runs pass no summarizer, and the sample KB has no transcript)
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/genea tests
@@ -1995,5 +2096,6 @@ EOF
 ## Self-review notes (already applied)
 
 - **Spec coverage:** detection and parsing (Task 1); chunking, `DocExtract.segments` (Task 2); schema 2, header in FTS/embedding only, `SchemaMismatch` for old index (Task 3); `SourceRef.cite`, `DocHit`, `read_document(start_s)` and wrappers (Task 4); `Summarizer`, Ollama map-reduce, `summary_model` (Task 5); cache keyed by sha256 with `SUMMARY_VERSION` and atomic write (Task 6); summary chunks, pre-pass, pending marker, retry, no-summarizer marker, `reindex_file` uses the cache only because it passes no reason and no summarizer (Task 7); `summarizing` phase and `--no-summaries` (Task 8); rule 7 for summaries, README, live test (Task 9). The spec's "Open items" (section size, pause threshold) are the constants `SECTION_CHARS`, `PAUSE_SECONDS`.
+- **Second review (Opus):** the transcript window budget is measured as escaped JSON instead of a fixed estimate, and the same budget now also fixes long ordinary documents (measured: a 32,000-character `.txt` reached the model as 2,001 characters); summary chunks no longer create person links, because `find_conflicts` treats linked passages' years as document evidence; transcript conflicts cite the moment; the Ollama request sets `num_ctx`.
 - **Additions to the spec made in this plan:** `DocumentText.next_start_s` (so a model can continue reading without parsing the text), `SummaryUnavailable` (stop after the first connection failure), `make_summarizer` returns `None` when no local model is configured (the index then runs without summaries and says so), and `--resummarize` is intentionally absent (decided with the user).
 - **Known behavior, as agreed:** deleting a cache file or bumping `SUMMARY_VERSION` takes effect for a transcript only when that transcript is re-indexed (changed file, `--rebuild`, or `summary pending`).
