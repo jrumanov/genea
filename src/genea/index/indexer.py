@@ -397,7 +397,9 @@ def _index_locked(kb: KnowledgeBase, embedder: Embedder, rebuild: bool, progress
             seen.add(rel)
             progress.update(len(seen))
             old = known.get(rel)
-            retry = summarizer is not None and _summary_pending(old)  # a transcript still waiting for its summary
+            # a transcript still waiting for its summary: it can get one now, or one was imported meanwhile
+            retry = _summary_pending(old) and (summarizer is not None
+                                               or summary_cache.load(kb, old["sha256"]) is not None)
             try:
                 mtime = source_mtime(path, kind)
                 if old is not None and old["status"] != "error" and old["mtime"] == mtime and not retry:

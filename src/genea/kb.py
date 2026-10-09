@@ -62,6 +62,11 @@ class KnowledgeBase:
     def summaries_dir(self) -> Path:
         return self.meta_dir / "summaries"
 
+    @property
+    def summary_work_dir(self) -> Path:
+        """Transcript sections for an outside summarizer and its answers (`genea summaries`)."""
+        return self.meta_dir / "summary-work"
+
     def ensure_dirs(self) -> None:
         for sub in SUBDIRS:
             (self.meta_dir / sub).mkdir(parents=True, exist_ok=True)
