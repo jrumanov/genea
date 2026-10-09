@@ -20,6 +20,7 @@ class Settings:
     gedcom_direct_write: bool = False
     exclude: tuple[str, ...] = ()
     exiftool: str = "exiftool"
+    summary_model: str = ""  # Ollama model for transcript summaries; empty: the chat model, if it is an ollama: one
 
 
 class KBNotFound(Exception):
