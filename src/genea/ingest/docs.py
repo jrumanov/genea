@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,6 +28,7 @@ class DocExtract:
     pages: list[Page] = field(default_factory=list)
     needs_ocr: bool = False
     segments: list[Segment] = field(default_factory=list)  # a Whisper transcript: timed segments, no pages
+    warnings: list[str] = field(default_factory=list)  # what pypdf repaired while reading a damaged PDF
 
 
 @dataclass
@@ -49,6 +53,29 @@ def _single(text: str) -> DocExtract:
     return DocExtract([Page(None, text)] if text.strip() else [])
 
 
+class _Collect(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+@contextmanager
+def _pypdf_warnings() -> Iterator[list[str]]:
+    """Collect pypdf's warnings (e.g. 'Ignoring wrong pointing object') instead of printing them."""
+    logger = logging.getLogger("pypdf")
+    handler, propagate = _Collect(), logger.propagate
+    logger.addHandler(handler)
+    logger.propagate = False
+    try:
+        yield handler.messages
+    finally:
+        logger.removeHandler(handler)
+        logger.propagate = propagate
+
+
 def extract_document(path: Path) -> DocExtract:
     suffix = path.suffix.lower()
     if suffix == ".txt":
@@ -65,13 +92,14 @@ def extract_document(path: Path) -> DocExtract:
                 parts.append(" | ".join(cell.text for cell in row.cells))
         return _single("\n".join(p for p in parts if p.strip()))
     if suffix == ".pdf":
-        reader = PdfReader(str(path))
-        pages = []
-        for number, page in enumerate(reader.pages, start=1):
-            text = page.extract_text() or ""
-            if text.strip():
-                pages.append(Page(number, text))
-        return DocExtract(pages, needs_ocr=bool(reader.pages) and not pages)
+        with _pypdf_warnings() as warnings:
+            reader = PdfReader(str(path))
+            pages = []
+            for number, page in enumerate(reader.pages, start=1):
+                text = page.extract_text() or ""
+                if text.strip():
+                    pages.append(Page(number, text))
+        return DocExtract(pages, needs_ocr=bool(reader.pages) and not pages, warnings=warnings)
     raise ValueError(f"Unsupported document type: {path.suffix}")
 
 
