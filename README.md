@@ -90,7 +90,7 @@ variable works too.
 | Command | What it does |
 |---|---|
 | `genea doctor` | Check ExifTool, Ollama and the models |
-| `genea init` / `index [--rebuild]` / `status` | Set up, index, and inspect a knowledge base |
+| `genea init` / `index [--rebuild] [--no-summaries]` / `status` | Set up, index, and inspect a knowledge base |
 | `genea ask "..."` / `chat` | Talk to the agent (`--show-tools` shows its tool calls) |
 | `genea person <name or id>` | Look a person up without the LLM |
 | `genea conflicts [id]` | Rule-based consistency checks without the LLM |
@@ -121,6 +121,22 @@ changes to `.genea/changes/pending/`. Review them with `genea changes show <id>`
 | `tool_output_chars` | `12000` | Truncation limit for each tool result |
 | `privacy_notice` | `true` | Warn when a cloud model will receive your data |
 | `exiftool` | `exiftool` | Path to the ExifTool binary |
+| `summary_model` | `""` | Ollama model for transcript summaries (empty: the chat model, if it is an `ollama:` one) |
+
+## Transcripts
+
+A `.txt` file made of Whisper segments (`start<TAB>end<TAB> text`) is indexed as a recording: chunks keep
+their time in the recording, and answers cite a moment, like `[podcast_family/2022_05_10-x.txt @14:20]`.
+`read_document` with `start_s` reads a transcript from that second onward.
+
+`genea index` also asks `summary_model` (through Ollama) for a summary of each recording and of each
+section of about 12,000 characters. Summaries are stored in `.genea/summaries/`, one file per transcript,
+so `index --rebuild` and model changes do not run the LLM again; a summary is made again only when the
+transcript changes or the cache file is deleted and the transcript is re-indexed. Summaries help to find the right recording and moment; the agent is told to
+read the transcript and cite that, never the summary. The first run over many long recordings takes a
+while; `genea index --no-summaries` skips this step, and a later `genea index` fills the summaries in.
+If Ollama is not running, transcripts are still indexed and searchable, and the summaries are retried on
+the next run (`genea status` lists them as `summary pending`).
 
 ## Privacy
 
