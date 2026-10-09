@@ -136,6 +136,18 @@ section, so the only citation the agent can copy is the transcript timestamp.
 Links: `rebuild_links` already runs over all chunks, so summary chunks get person links too. Consequence:
 `find_person` style lookups can surface a recording whose summary names a person. Accepted.
 
+## Details settled while planning
+
+- `read_document` on a transcript also returns `next_start_s` (the start of the first segment that did not fit),
+  so a model can continue reading without parsing the text. The window is `tool_output_chars` minus 800
+  characters for the JSON around it; otherwise the tool runner would shrink a long window to 2,000 characters.
+- When Ollama cannot be reached (`SummaryUnavailable`), the remaining transcripts of the run are not tried;
+  they are indexed without summaries and marked `summary pending` with the reason.
+- `summary_model` is a plain Ollama model name (no `ollama:` prefix). If it is empty and the chat model is not
+  an `ollama:` one, there is no summarizer: `genea index` says so and marks transcripts `summary pending`.
+- There is no `--resummarize` flag (decided with the user). Deleting a cache file or bumping `SUMMARY_VERSION`
+  takes effect for a transcript when it is next indexed (changed file, `--rebuild`, or `summary pending`).
+
 ## Error handling
 
 | Situation | Behaviour |
