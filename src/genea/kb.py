@@ -12,6 +12,8 @@ DEFAULT_KB_CONFIG = """\
 # override the global ~/.genea/config.toml.
 # model = "ollama:qwen3:14b"          # or "anthropic:claude-sonnet-5-5"
 # exclude = ["private/**", "*.tmp"]   # glob patterns relative to this folder
+# transcribe_model = "medium"         # or "large-v3", or the path of a ggml .bin file
+# transcribe_language = "sk"          # empty: auto-detect
 """
 
 SUBDIRS = ("notes", "changes/pending", "changes/applied", "changes/rejected",

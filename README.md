@@ -96,6 +96,9 @@ variable works too.
 | `genea person <name or id>` | Look a person up without the LLM |
 | `genea conflicts [id]` | Rule-based consistency checks without the LLM |
 | `genea mcp` | Serve the knowledge base to Claude as a read-only MCP server (see "Use with Claude") |
+| `genea transcribe <audio> [--model M] [--language L] [--start S] [--out F]` | Transcribe a recording with whisper.cpp into a Whisper-format `.txt`, with live progress |
+| `genea transcripts check [path]` | List transcripts where Whisper looped or stopped early (exit code 1 if any) |
+| `genea transcripts repair <transcript> [--from S] [--model M] [--language L] [--no-splice]` | Re-transcribe the lost part from the audio and splice it in |
 | `genea changes list / show / apply / reject / undo / export` | Review what the agent proposed |
 
 ## How changes work
@@ -124,6 +127,8 @@ changes to `.genea/changes/pending/`. Review them with `genea changes show <id>`
 | `log_prompts` | `true` | Append every `ask`/`chat` question and answer to `.genea/prompts.md` (fill in `verdict`/`note` by hand to mark good and bad answers) |
 | `exiftool` | `exiftool` | Path to the ExifTool binary |
 | `summary_model` | `""` | Ollama model for transcript summaries (empty: the chat model, if it is an `ollama:` one) |
+| `transcribe_model` | `medium` | whisper.cpp model for `genea transcribe` / `transcripts repair` (a name or the path of a ggml `.bin`) |
+| `transcribe_language` | `""` | Language code such as `sk`; empty means auto-detect |
 
 ## Transcripts
 
@@ -151,6 +156,26 @@ even without a `summary_model`. In this repo, ask Claude Code to "summarize pend
 
 Upgrading: the index format changed (schema 2). Run `genea index --rebuild --no-summaries` first to make
 everything searchable quickly, then `genea index` to add the summaries (cached ones are reused).
+
+## Transcribing and repairing recordings
+
+Whisper sometimes loops on one line until the end of a recording, or stops early. The index then holds an
+incomplete recording without saying so. `genea transcripts check` finds these (a run of at least three identical
+segments lasting a minute or more, or a transcript that ends a minute or more before its audio) and
+`genea doctor` mentions them. `genea transcripts repair <transcript>` cuts the audio from the segment before the
+lost part, transcribes it again, and splices the result in. The first original is kept as `<name>.txt.orig`,
+other lines are not touched, and a result that loops again is not spliced. Run `genea index` afterwards:
+only that transcript is indexed again and its summary regenerated.
+
+`genea transcribe <audio>` makes a transcript from scratch. Both commands print a line per decoded segment:
+`[ 98.1%] 39:55  elapsed 11.0m  eta 0.2m  To sú kokosové.`
+
+They need the extra `transcribe` (`uv sync --extra transcribe`; `check` works without it but cannot read audio
+lengths). The model is `transcribe_model` (default `medium`; a name such as `large-v3` is downloaded on first
+use, or give the path of a ggml `.bin`, for example the models of Audacity's OpenVINO plugin). `--language`
+or `transcribe_language` fixes the language (`sk`); when neither is set it is auto-detected, which can go wrong
+on a short span, so set it for a repair. The audio must sit next to the transcript with the same name
+(`.m4a`, `.mp3`, `.wav`, `.mp4`, `.ogg` or `.flac`).
 
 ## Privacy
 

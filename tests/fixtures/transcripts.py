@@ -25,3 +25,16 @@ def write_transcript(root: Path, name: str = NAME, rows=None) -> Path:
     path = root / "docs" / name
     path.write_text(whisper(sample_rows() if rows is None else rows), encoding="utf-8")
     return path
+
+
+LOOP_TEXT = "No a ja tam si sa učila."
+
+
+def loop_rows(start: float, count: int, text: str = LOOP_TEXT) -> list[tuple[float, float, str]]:
+    """`count` identical one-second segments from `start`: Whisper looping."""
+    return [(start + i, start + i + 1, text) for i in range(count)]
+
+
+def speech_rows(count: int) -> list[tuple[float, float, str]]:
+    """`count` different ten-second segments from 0 s."""
+    return [(i * 10.0, i * 10.0 + 10.0, f"Veta {i}.") for i in range(count)]

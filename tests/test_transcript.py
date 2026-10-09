@@ -1,8 +1,21 @@
 import pytest
-from fixtures.transcripts import whisper
+from fixtures.transcripts import LOOP_TEXT, loop_rows, speech_rows, whisper
 
-from genea.ingest.docs import chunk_segments
-from genea.ingest.transcript import Segment, format_time, is_transcript, parse_transcript, transcript_header
+from genea.ingest.docs import chunk_segments, read_raw_transcript
+from genea.ingest.transcript import (
+    DeadSpan,
+    Run,
+    Segment,
+    collapse_loops,
+    dead_spans,
+    find_runs,
+    format_time,
+    is_transcript,
+    parse_line,
+    parse_segments,
+    parse_transcript,
+    transcript_header,
+)
 
 
 def test_detects_whisper_output():
@@ -117,3 +130,61 @@ def test_a_segment_longer_than_the_chunk_size_still_terminates():
 
 def test_no_segments_no_chunks():
     assert chunk_segments([]) == []
+
+
+def test_parse_line_returns_a_segment_or_none():
+    assert parse_line("0.600000\t8.560000\t Dobre.\r\n") == Segment(0.6, 8.56, "Dobre.")
+    assert parse_line("stray line") is None
+    assert parse_line("1.000000\t2.000000\t   \n") is None
+
+
+def test_parse_segments_keeps_loops_that_parse_transcript_collapses():
+    text = whisper([(0, 2, "A."), (2, 4, "B."), (4, 6, "B."), (6, 8, "B."), (8, 10, "C.")])
+    assert len(parse_segments(text)) == 5
+    assert len(parse_transcript(text)) == 3
+    assert parse_segments("Kronika obce Brno.\n") == []
+
+
+def test_find_runs_needs_three_in_a_row():
+    segs = [Segment(0, 1, "a"), Segment(1, 2, "b"), Segment(2, 3, "b"),
+            Segment(3, 4, "c"), Segment(4, 5, "c"), Segment(5, 6, "c")]
+    assert find_runs(segs) == [Run(3, 5, "c")]
+
+
+def test_a_long_loop_is_a_dead_span():
+    rows = speech_rows(2) + loop_rows(20, 100)
+    assert dead_spans(parse_segments(whisper(rows))) == [DeadSpan(20.0, 120.0, LOOP_TEXT, 100, 2, 101)]
+
+
+def test_a_short_loop_is_not_a_dead_span():
+    rows = speech_rows(1) + loop_rows(10, 30)  # 30 s of the same line is a stutter
+    assert dead_spans(parse_segments(whisper(rows))) == []
+
+
+def test_a_loop_of_exactly_sixty_seconds_is_a_dead_span():
+    exact = [Segment(0.0, 1.0, "a")] + [Segment(1.0 + i * 20, 1.0 + (i + 1) * 20, "b") for i in range(3)]
+    assert dead_spans(exact) == [DeadSpan(1.0, 61.0, "b", 3, 1, 3)]
+    short = [Segment(0.0, 1.0, "a")] + [Segment(1.0 + i * 19.95, 1.0 + (i + 1) * 19.95, "b") for i in range(3)]
+    assert dead_spans(short) == []  # 59.85 s
+
+
+def test_collapse_loops_merges_each_run_and_keeps_the_rest():
+    segs = [Segment(0, 1, "a"), Segment(1, 2, "b"), Segment(2, 3, "b"), Segment(3, 4, "b"),
+            Segment(4, 5, "c"), Segment(5, 6, "c"), Segment(6, 7, "d")]
+    assert collapse_loops(segs) == [Segment(0, 1, "a"), Segment(1, 4, "b"), Segment(4, 5, "c"),
+                                    Segment(5, 6, "c"), Segment(6, 7, "d")]
+    assert collapse_loops([]) == []
+
+
+def test_read_raw_transcript_keeps_loops_and_ignores_other_files(tmp_path):
+    rows = speech_rows(2) + loop_rows(20, 5)
+    transcript = tmp_path / "x.txt"
+    transcript.write_bytes(("﻿" + whisper(rows).replace("\n", "\r\n")).encode("utf-8"))  # BOM and CRLF
+    raw = read_raw_transcript(transcript)
+    assert raw == parse_segments(whisper(rows)) and len(raw) == 7  # the loop is not collapsed
+    notes = tmp_path / "notes.txt"
+    notes.write_text("Kronika obce Brno.\n", encoding="utf-8")
+    assert read_raw_transcript(notes) == []
+    other = tmp_path / "x.md"
+    other.write_text(whisper(rows), encoding="utf-8")
+    assert read_raw_transcript(other) == []  # only .txt files are transcripts
