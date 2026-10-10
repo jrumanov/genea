@@ -6,7 +6,7 @@ description: Use when the user asks to extract, transcribe or write an MD file f
 # Extract the tagged people from a census sheet
 
 A census sheet (house sheet) lists everyone living in one house. The MD file covers ONLY the people
-tagged on the image, plus the house header and the census date. Everyone else on the sheet is out of scope.
+tagged on the image, the servants of the household, plus the house header and the census date. Everyone else on the sheet is out of scope.
 The writing is usually Slovak handwriting (older sheets can be Czech, Hungarian or German).
 
 ## 1. Check the tags
@@ -48,8 +48,15 @@ Read the image (Read tool). From the top of the sheet take:
   religion, nationality, marital status, occupation, literacy, residence status, etc., as the form
   has them).
 
-Do not transcribe rows of untagged people, even relatives in the same household. Their names appear
-only where a column of a tagged person points at them (for example "wife of ...", "son of ...").
+- **Servants**: also transcribe, in full like a tagged person, every row of the same household whose
+  relation to the head or occupation says servant (`služobná`, `služobný`, `služka`, `slúžka`,
+  `čeľaď`, "domáce služby", "pomocnica v domácnosti", maid, butler), even when they are not tagged.
+  Apprentices, lodgers and guests are not servants. They are listed after the tagged people, under
+  a heading that says "(servant, not tagged)".
+
+Do not transcribe rows of any other untagged people, even relatives in the same household. Their
+names appear only where a column of a tagged person points at them (for example "wife of ...",
+"son of ...").
 
 ## 3. Back page (`_a2`, or `_b`)
 
@@ -93,9 +100,9 @@ as the other MD files in `rodinna historia/dokumenty_sorted`.
 
 ## 6. Check before saying done
 
-- The file names only the tagged people, the owner of the house and, inside their rows, relation
-  targets.
+- The file names only the tagged people, the servants of the household, the owner of the house and,
+  inside their rows, relation targets.
 - Every name, number and date matches the image; doubtful readings are marked, not smoothed over.
 - Tell the user: which tagged people were found on the front, back or not at all, what was blacked
-  out or doubtful, and the path written. If the sheet held other people you skipped, say so in one
-  line without listing them.
+  out or doubtful, which servants were added, and the path written. If the sheet held other people you
+  skipped, say so in one line without listing them.
