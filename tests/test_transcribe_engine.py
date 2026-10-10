@@ -3,8 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from genea.transcribe.convert import ConvertError
 from genea.transcribe.engine import (
     EXTRA_HINT,
+    HF_MODELS,
     ModelUnavailable,
     WhisperCpp,
     language_label,
@@ -75,6 +77,42 @@ def test_a_failed_download_names_the_model_and_the_folder(tmp_path):
         resolve_model("medium", constants=constants, utils=utils)
     assert "medium" in str(err.value) and str(constants.MODELS_DIR) in str(err.value)
     assert "transcribe_model" in str(err.value)
+
+
+def test_a_hugging_face_alias_is_converted_once_with_its_repository(tmp_path):
+    constants, utils, log = fakes(tmp_path)
+    calls = []
+
+    def convert(repo, target, notify):
+        calls.append((repo, target.name))
+        target.parent.mkdir(exist_ok=True)
+        target.write_bytes(b"ggml")
+        return target
+
+    first = resolve_model("sk-medium", constants=constants, utils=utils, convert=convert)
+    assert first == constants.MODELS_DIR / "ggml-sk-medium.bin"
+    assert resolve_model("sk-medium", constants=constants, utils=utils, convert=convert) == first
+    assert calls == [("kinit/whisper-medium-sk", "ggml-sk-medium.bin")] and log == []  # nothing downloaded as ggml
+    assert HF_MODELS["sk-large-v3-turbo"] == "NaiveNeuron/whisper-large-v3-turbo-sk"
+
+
+def test_a_failed_conversion_is_a_model_unavailable_error(tmp_path):
+    constants, utils, _ = fakes(tmp_path)
+
+    def convert(repo, target, notify):
+        raise ConvertError("needs the convert extra")
+
+    with pytest.raises(ModelUnavailable, match="needs the convert extra"):
+        resolve_model("sk-large-v3-turbo", constants=constants, utils=utils, convert=convert)
+
+
+def test_a_model_converted_by_hand_is_found_by_name(tmp_path):
+    constants, utils, log = fakes(tmp_path)
+    constants.MODELS_DIR.mkdir()
+    (constants.MODELS_DIR / "ggml-my-model.bin").write_bytes(b"x")
+    assert resolve_model("my-model", constants=constants, utils=utils).name == "ggml-my-model.bin"
+    with pytest.raises(ModelUnavailable, match="sk-medium"):  # the error lists the Hugging Face aliases too
+        resolve_model("other", constants=constants, utils=utils)
 
 
 def test_without_pywhispercpp_a_model_name_and_the_transcriber_explain_the_extra(tmp_path, monkeypatch):
