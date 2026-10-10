@@ -16,6 +16,7 @@ APPROX_SIZE = {"tiny": "75 MB", "base": "142 MB", "small": "466 MB", "medium": "
                "large-v1": "2.9 GB", "large-v2": "2.9 GB", "large-v3": "2.9 GB", "large-v3-turbo": "1.6 GB"}
 # Slovak fine-tunes published only as Hugging Face checkpoints: converted to ggml on first use
 HF_MODELS = {"sk-medium": "kinit/whisper-medium-sk",  # slaih.sk/en/catalog/whisper-medium-sk
+             "sk-small": "NaiveNeuron/whisper-small-sk",
              "sk-large-v3-turbo": "NaiveNeuron/whisper-large-v3-turbo-sk"}
 
 

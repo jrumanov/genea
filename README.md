@@ -97,7 +97,7 @@ variable works too.
 | `genea conflicts [id]` | Rule-based consistency checks without the LLM |
 | `genea mcp` | Serve the knowledge base to Claude as a read-only MCP server (see "Use with Claude") |
 | `genea transcribe <audio> [--model M] [--language L] [--start S] [--out F]` | Transcribe a recording with whisper.cpp into a Whisper-format `.txt`, with live progress |
-| `genea transcribe-model convert <hf-repo\|folder\|sk-medium\|sk-large-v3-turbo> [--name N] [--force]` | Convert a Hugging Face Whisper checkpoint to a whisper.cpp model, e.g. the Slovak fine-tunes |
+| `genea transcribe-model convert <hf-repo\|folder\|sk-small\|sk-medium\|sk-large-v3-turbo> [--name N] [--force]` | Convert a Hugging Face Whisper checkpoint to a whisper.cpp model, e.g. the Slovak fine-tunes |
 | `genea transcripts check [path]` | List transcripts where Whisper looped or stopped early (exit code 1 if any) |
 | `genea transcripts repair <transcript> [--from S] [--model M] [--language L] [--no-splice]` | Re-transcribe the lost part from the audio and splice it in |
 | `genea changes list / show / apply / reject / undo / export` | Review what the agent proposed |
@@ -128,7 +128,7 @@ changes to `.genea/changes/pending/`. Review them with `genea changes show <id>`
 | `log_prompts` | `true` | Append every `ask`/`chat` question and answer to `.genea/prompts.md` (fill in `verdict`/`note` by hand to mark good and bad answers) |
 | `exiftool` | `exiftool` | Path to the ExifTool binary |
 | `summary_model` | `""` | Ollama model for transcript summaries (empty: the chat model, if it is an `ollama:` one) |
-| `transcribe_model` | `medium` | whisper.cpp model for `genea transcribe` / `transcripts repair` (a name, `sk-medium`, `sk-large-v3-turbo`, or the path of a ggml `.bin`) |
+| `transcribe_model` | `medium` | whisper.cpp model for `genea transcribe` / `transcripts repair` (a name, `sk-small`, `sk-medium`, `sk-large-v3-turbo`, or the path of a ggml `.bin`) |
 | `transcribe_language` | `""` | Language code such as `sk`; empty means auto-detect |
 
 ## Transcripts
@@ -178,10 +178,11 @@ or `transcribe_language` fixes the language (`sk`); when neither is set it is au
 on a short span, so set it for a repair. The audio must sit next to the transcript with the same name
 (`.m4a`, `.mp3`, `.wav`, `.mp4`, `.ogg` or `.flac`).
 
-**Slovak fine-tunes.** `sk-medium` ([kinit/whisper-medium-sk](https://slaih.sk/en/catalog/whisper-medium-sk))
+**Slovak fine-tunes.** `sk-small` ([NaiveNeuron/whisper-small-sk](https://huggingface.co/NaiveNeuron/whisper-small-sk)),
+`sk-medium` ([kinit/whisper-medium-sk](https://slaih.sk/en/catalog/whisper-medium-sk))
 and `sk-large-v3-turbo` ([NaiveNeuron/whisper-large-v3-turbo-sk](https://huggingface.co/NaiveNeuron/whisper-large-v3-turbo-sk))
 are only published as Hugging Face checkpoints, which whisper.cpp cannot load. With the extra `convert`
-(`uv sync --extra transcribe --extra convert`) they are downloaded and converted to ggml (float16, 1.5 GB each)
+(`uv sync --extra transcribe --extra convert`) they are downloaded and converted to ggml (float16, 0.5 GB for `sk-small`, 1.5 GB for the others)
 on first use, so `--model sk-medium` or `transcribe_model = "sk-medium"` is all it takes; `genea transcribe-model
 convert` does the same ahead of time, and also converts any other Whisper repository or downloaded folder
 (`genea transcribe-model convert owner/name`, then `--model name`). The download is cached by Hugging Face, so

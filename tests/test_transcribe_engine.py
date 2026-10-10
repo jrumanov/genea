@@ -93,6 +93,7 @@ def test_a_hugging_face_alias_is_converted_once_with_its_repository(tmp_path):
     assert first == constants.MODELS_DIR / "ggml-sk-medium.bin"
     assert resolve_model("sk-medium", constants=constants, utils=utils, convert=convert) == first
     assert calls == [("kinit/whisper-medium-sk", "ggml-sk-medium.bin")] and log == []  # nothing downloaded as ggml
+    assert HF_MODELS["sk-small"] == "NaiveNeuron/whisper-small-sk"
     assert HF_MODELS["sk-large-v3-turbo"] == "NaiveNeuron/whisper-large-v3-turbo-sk"
 
 
