@@ -51,7 +51,7 @@ def _settings(ctx: typer.Context) -> Settings:
     return load_settings(root)
 
 
-MODEL_OPTION = typer.Option(None, "--model", help="Model name (downloaded or, for sk-medium and "
+MODEL_OPTION = typer.Option(None, "--model", help="Model name (downloaded or, for sk-small, sk-medium and "
                                                    "sk-large-v3-turbo, converted on first use) or path of a ggml "
                                                    ".bin; default: transcribe_model.")
 LANGUAGE_OPTION = typer.Option(None, "--language", help="Language code such as sk; default: transcribe_language, "
@@ -109,7 +109,7 @@ def transcribe(
 
 @transcribe_model_app.command("convert")
 def convert(
-    source: str = typer.Argument(..., help="Hugging Face model (owner/name, or sk-medium / sk-large-v3-turbo) "
+    source: str = typer.Argument(..., help="Hugging Face model (owner/name, or sk-small / sk-medium / sk-large-v3-turbo) "
                                            "or a folder holding a downloaded safetensors checkpoint."),
     name: str | None = typer.Option(None, "--name", help="Name of the converted model (default: the short name "
                                                          "or the last part of SOURCE)."),
