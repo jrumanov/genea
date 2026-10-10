@@ -35,6 +35,9 @@ class FakeSamples:
     def __len__(self):
         return self.count
 
+    def __getitem__(self, key):
+        return FakeSamples(max(0, min(key.stop, self.count) - key.start))
+
 
 def wave_seconds(path):
     with wave.open(str(path), "rb") as w:
@@ -298,3 +301,116 @@ def test_convert_failure_is_reported_without_a_traceback(tmp_path, monkeypatch):
     patch_conversion(monkeypatch, tmp_path, fail=ConvertError("no network"))
     result = runner.invoke(app, ["transcribe-model", "convert", "sk-medium"])
     assert result.exit_code == 1 and "no network" in result.output
+
+
+def patch_two_models(monkeypatch, structure_rows, texts=None, text_effect=None):
+    """make_transcriber: 'base' is the structure model, anything else numbers its texts T1, T2, ..."""
+    made, ensured, counter = [], [], iter(range(1, 100))
+
+    def fake_make(settings, model):
+        made.append(model)
+        if model == "base":
+            return FakeTranscriber(structure_rows)
+
+        def text_model(samples, language, on_segment):
+            n = next(counter)
+            if text_effect:
+                text_effect(n)
+            on_segment(Segment(0.0, 1.0, (texts or {}).get(n, f"T{n}")))
+
+        return text_model
+
+    monkeypatch.setattr("genea.cli.transcribecmds.make_transcriber", fake_make)
+    monkeypatch.setattr("genea.cli.transcribecmds.ensure_models", lambda settings, names: ensured.append(names))
+    return made, ensured
+
+
+def test_double_pass_writes_pass_one_boundaries_with_pass_two_text(tmp_path, monkeypatch):
+    audio = tmp_path / "2023_y.wav"
+    write_silence(audio, 30)
+    made, ensured = patch_two_models(monkeypatch, [(0.0, 10.0, "aaaa bbbb"), (10.0, 25.0, "cccc dddd")])
+    result = runner.invoke(app, ["transcribe", str(audio), "--structure-model", "base",
+                                 "--model", "sk-large-v3-turbo", "--language", "sk"])
+    assert result.exit_code == 0, result.output
+    out = (tmp_path / "2023_y.txt").read_bytes().decode("utf-8")
+    assert out == "0.000000\t10.000000\t T1\r\n10.000000\t25.000000\t T2\r\n"
+    assert ensured == [["base", "sk-large-v3-turbo"]]  # both names resolved before any audio is decoded
+    assert made == ["base", "sk-large-v3-turbo"]
+    assert "[1/2 structure]" in result.output and "[2/2 text]" in result.output
+    assert "Structure pass finished" in result.output and "2 segments written to" in result.output
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["2023_y.txt", "2023_y.wav"]
+
+
+def test_double_pass_offsets_the_times_by_start(tmp_path, monkeypatch):
+    audio = tmp_path / "2023_y.wav"
+    write_silence(audio, 30)
+    patch_two_models(monkeypatch, [(0.0, 10.0, "aaaa bbbb")])
+    result = runner.invoke(app, ["transcribe", str(audio), "--structure-model", "base", "--start", "5",
+                                 "--language", "sk"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "2023_y.txt").read_bytes() == b"5.000000\t15.000000\t T1\r\n"
+
+
+def test_the_setting_turns_the_double_pass_on_and_an_empty_flag_turns_it_off(isolated_home, tmp_path, monkeypatch):
+    (tmp_path / ".genea").mkdir()
+    (tmp_path / ".genea" / "config.toml").write_text('transcribe_structure_model = "base"\n', encoding="utf-8")
+    audio = tmp_path / "2023_y.wav"
+    write_silence(audio, 30)
+    made, ensured = patch_two_models(monkeypatch, [(0.0, 10.0, "aaaa bbbb")])
+    result = runner.invoke(app, ["--kb", str(tmp_path), "transcribe", str(audio), "--language", "sk"])
+    assert result.exit_code == 0, result.output
+    assert made == ["base", None] and ensured == [["base", None]]  # None: the transcribe_model setting
+    (tmp_path / "2023_y.txt").unlink()
+    made.clear()
+    ensured.clear()
+    result = runner.invoke(app, ["--kb", str(tmp_path), "transcribe", str(audio), "--structure-model", "",
+                                 "--language", "sk"])
+    assert result.exit_code == 0, result.output
+    assert made == [None] and ensured == []  # one model, as before
+    assert "[1/2 structure]" not in result.output
+
+
+def test_an_unknown_structure_model_fails_before_any_audio_is_decoded(tmp_path, monkeypatch):
+    from genea.transcribe.engine import ModelUnavailable
+
+    audio = tmp_path / "2023_y.wav"
+    write_silence(audio, 30)
+
+    def missing(settings, names):
+        raise ModelUnavailable("'nope' is neither a file nor a known model name.")
+
+    def no_audio(*args, **kwargs):
+        raise AssertionError("the audio was decoded")
+
+    monkeypatch.setattr("genea.cli.transcribecmds.ensure_models", missing)
+    monkeypatch.setattr("genea.cli.transcribecmds.load_span", no_audio)
+    result = runner.invoke(app, ["transcribe", str(audio), "--structure-model", "nope"])
+    assert result.exit_code == 1 and "neither a file nor a known model name" in result.output
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["2023_y.wav"]
+
+
+def test_a_structure_model_that_hears_nothing_stops_and_writes_nothing(tmp_path, monkeypatch):
+    audio = tmp_path / "2023_y.wav"
+    write_silence(audio, 30)
+    loop = [(float(i), float(i + 2), "Dookola.") for i in range(0, 12, 2)]  # pass 1 looped on silence
+    patch_two_models(monkeypatch, loop)
+    result = runner.invoke(app, ["transcribe", str(audio), "--structure-model", "base", "--language", "sk"])
+    assert result.exit_code == 1 and "found no speech" in result.output
+    assert isinstance(result.exception, SystemExit)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["2023_y.wav"]  # no .txt and no .txt.part
+
+
+def test_ctrl_c_in_pass_two_keeps_only_finished_text_in_the_part_file(tmp_path, monkeypatch):
+    audio = tmp_path / "2023_y.wav"
+    write_silence(audio, 30)
+
+    def interrupt_on_second(n):
+        if n == 2:
+            raise KeyboardInterrupt
+
+    patch_two_models(monkeypatch, [(0.0, 10.0, "aaaa bbbb"), (10.0, 25.0, "cccc dddd")],
+                     text_effect=interrupt_on_second)
+    result = runner.invoke(app, ["transcribe", str(audio), "--structure-model", "base", "--language", "sk"])
+    assert result.exit_code == 130 and "2023_y.txt.part" in result.output
+    assert not (tmp_path / "2023_y.txt").exists()
+    assert (tmp_path / "2023_y.txt.part").read_bytes() == b"0.000000\t10.000000\t T1\r\n"

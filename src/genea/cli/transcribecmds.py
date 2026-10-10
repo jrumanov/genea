@@ -15,6 +15,7 @@ from genea.ingest.transcript import Segment, format_time
 from genea.transcribe.audio import SAMPLE_RATE, AudioUnavailable, audio_duration, load_span
 from genea.transcribe.check import check_file, describe_span, transcripts
 from genea.transcribe.convert import ConvertError, convert_model
+from genea.transcribe.doublepass import NoSpeech, double_pass
 from genea.transcribe.engine import (
     HF_MODELS,
     ModelUnavailable,
@@ -38,6 +39,12 @@ def make_transcriber(settings: Settings, model: str | None) -> Transcriber:
     return WhisperCpp(resolve_model(model or settings.transcribe_model, say), say=say)
 
 
+def ensure_models(settings: Settings, names: list[str | None]) -> None:
+    """Finds, downloads or converts each model now, so a wrong name fails before any audio is decoded."""
+    for name in names:
+        resolve_model(name or settings.transcribe_model, say)
+
+
 def _fail(message: str) -> typer.Exit:
     common.console.print(f"[red]{escape(message)}[/red]", soft_wrap=True)  # no hard breaks inside a command
     return typer.Exit(1)
@@ -56,6 +63,10 @@ MODEL_OPTION = typer.Option(None, "--model", help="Model name (downloaded or, fo
                                                    ".bin; default: transcribe_model.")
 LANGUAGE_OPTION = typer.Option(None, "--language", help="Language code such as sk; default: transcribe_language, "
                                                          "and when that is empty, auto-detect.")
+STRUCTURE_OPTION = typer.Option(None, "--structure-model",
+                                help="Double pass: a small model (such as base) finds the segment boundaries, "
+                                     "then --model writes the text of each. Default: transcribe_structure_model; "
+                                     "empty means a single pass.")
 
 
 @app.command()
@@ -63,6 +74,7 @@ def transcribe(
     ctx: typer.Context,
     audio: Path = typer.Argument(..., exists=True, dir_okay=False, help="The recording."),
     model: str | None = MODEL_OPTION,
+    structure_model: str | None = STRUCTURE_OPTION,
     language: str | None = LANGUAGE_OPTION,
     start: float = typer.Option(0.0, "--start", min=0.0, help="Transcribe only from this second."),
     out: Path | None = typer.Option(None, "--out", help="Output file (default: next to the audio, .txt)."),
@@ -76,12 +88,20 @@ def transcribe(
         raise _fail(f"The folder {target.parent} does not exist; create it or pass another --out.")
     lang = resolve_language(language, settings.transcribe_language)
     say(f"Language: {language_label(lang)}")
+    structure = settings.transcribe_structure_model if structure_model is None else structure_model
+    transcriber = None
     try:
-        transcriber = make_transcriber(settings, model)
+        if structure:
+            ensure_models(settings, [structure, model])  # both names are checked before pass 1 starts
+            say(f"Double pass: boundaries from {structure}, text from {model or settings.transcribe_model}")
+        else:
+            transcriber = make_transcriber(settings, model)
         samples = load_span(audio, start, None)
     except (ModelUnavailable, AudioUnavailable) as exc:
         raise _fail(str(exc)) from exc
-    progress = Progress(len(samples) / SAMPLE_RATE, start)
+    total = len(samples) / SAMPLE_RATE
+    progress = Progress(total, start)
+    prefix = "[2/2 text] " if structure else ""
     # Written aside and renamed at the end, so a failed run never leaves a partial transcript under the
     # real name (it would be indexed, and the next run would refuse to overwrite it).
     part = target.with_name(target.name + ".part")
@@ -90,13 +110,31 @@ def transcribe(
             def on_segment(s: Segment) -> None:
                 file.write(format_segment(Segment(s.start + start, s.end + start, s.text)) + "\r\n")
                 file.flush()
-                say(progress.line(s.end, s.text))
+                say(prefix + progress.line(s.end, s.text))
 
-            transcriber(samples, lang, on_segment)
+            if structure:
+                structure_progress = Progress(total, start)
+
+                def on_structure(s: Segment) -> None:
+                    say("[1/2 structure] " + structure_progress.line(s.end, s.text))
+
+                def on_text_start() -> None:
+                    nonlocal progress
+                    say(f"Structure pass finished in {structure_progress.elapsed() / 60:.1f}m")
+                    progress = Progress(total, start)  # the estimate of pass 2 must not include pass 1
+
+                double_pass(samples, lang, lambda: make_transcriber(settings, structure),
+                            lambda: make_transcriber(settings, model), on_segment, say=say,
+                            on_structure=on_structure, on_text_start=on_text_start)
+            else:
+                transcriber(samples, lang, on_segment)
     except KeyboardInterrupt:
         say(f"Interrupted; {target.name} was not written. The part transcribed so far is in {part} "
             "(a new run starts over and replaces it).")
         raise typer.Exit(130) from None
+    except (ModelUnavailable, NoSpeech) as exc:
+        part.unlink(missing_ok=True)
+        raise _fail(str(exc)) from exc
     except BaseException:
         part.unlink(missing_ok=True)
         raise
