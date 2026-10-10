@@ -341,6 +341,21 @@ def test_double_pass_writes_pass_one_boundaries_with_pass_two_text(tmp_path, mon
     assert sorted(p.name for p in tmp_path.iterdir()) == ["2023_y.txt", "2023_y.wav"]
 
 
+def test_an_interrupt_during_the_structure_pass_does_not_point_at_the_part_file(tmp_path, monkeypatch):
+    audio = tmp_path / "2023_y.wav"
+    write_silence(audio, 30)
+
+    def interrupted(samples, language, on_segment):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("genea.cli.transcribecmds.make_transcriber", lambda settings, model: interrupted)
+    monkeypatch.setattr("genea.cli.transcribecmds.ensure_models", lambda settings, names: None)
+    result = runner.invoke(app, ["transcribe", str(audio), "--structure-model", "base", "--model", "large"])
+    assert result.exit_code == 130
+    assert "structure pass" in result.output and ".part" not in result.output
+    assert not (tmp_path / "2023_y.txt").exists()
+
+
 def test_double_pass_offsets_the_times_by_start(tmp_path, monkeypatch):
     audio = tmp_path / "2023_y.wav"
     write_silence(audio, 30)

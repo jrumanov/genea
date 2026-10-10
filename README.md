@@ -196,8 +196,8 @@ sk-large-v3-turbo --language sk` runs the small model first to find the segment 
 the audio of each segment, and writes the first model's times with the second model's text (or set
 `transcribe_structure_model` and `transcribe_model`; `--structure-model ""` switches it off again). A segment
 for which the fine-tune hears nothing or loops is left out, and a segment whose text is very different in
-length from the first pass is kept but listed as `check:` in the output. It takes about one run of the large model
-plus a quick run of the small one. Speaker labels are not produced: Whisper does not tell speakers apart.
+length from the first pass is kept but listed as `check:` in the output. It is slower than a single pass; how much
+slower has not been measured yet. Speaker labels are not produced: Whisper does not tell speakers apart.
 
 ## Privacy
 

@@ -105,6 +105,7 @@ def transcribe(
     # Written aside and renamed at the end, so a failed run never leaves a partial transcript under the
     # real name (it would be indexed, and the next run would refuse to overwrite it).
     part = target.with_name(target.name + ".part")
+    text_started = not structure  # False while pass 1 runs: the .part file is still empty then
     try:
         with part.open("w", encoding="utf-8", newline="") as file:
             def on_segment(s: Segment) -> None:
@@ -119,7 +120,8 @@ def transcribe(
                     say("[1/2 structure] " + structure_progress.line(s.end, s.text))
 
                 def on_text_start() -> None:
-                    nonlocal progress
+                    nonlocal progress, text_started
+                    text_started = True
                     say(f"Structure pass finished in {structure_progress.elapsed() / 60:.1f}m")
                     progress = Progress(total, start)  # the estimate of pass 2 must not include pass 1
 
@@ -129,8 +131,11 @@ def transcribe(
             else:
                 transcriber(samples, lang, on_segment)
     except KeyboardInterrupt:
-        say(f"Interrupted; {target.name} was not written. The part transcribed so far is in {part} "
-            "(a new run starts over and replaces it).")
+        if text_started:
+            say(f"Interrupted; {target.name} was not written. The part transcribed so far is in {part} "
+                "(a new run starts over and replaces it).")
+        else:
+            say(f"Interrupted during the structure pass; {target.name} was not written.")
         raise typer.Exit(130) from None
     except (ModelUnavailable, NoSpeech) as exc:
         part.unlink(missing_ok=True)
