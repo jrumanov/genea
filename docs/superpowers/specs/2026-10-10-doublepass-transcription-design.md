@@ -47,14 +47,14 @@ that is already final, never boundaries without text.
 1. **Pass 1.** Transcribe the whole recording with the structure model. Collect the segments
    `(start, end, text)`. Discard its text, except as described in step 4.
 2. **Clean the boundaries.**
-   - Drop segments whose text is empty after stripping, and runs of identical text that the existing
-     loop detection (`genea.transcribe.check`) would collapse. These are silence hallucinations of
+   - Drop segments whose text is empty after stripping, and runs of identical text (3 or more
+     identical segments in a row, found by `find_runs` in `genea.ingest.transcript`). These are silence hallucinations of
      the small model.
    - Merge a segment shorter than 1.0 s into its neighbour (the previous one, or the next one for
      the first segment), because Whisper hallucinates on very short clips.
-3. **Pass 2.** Load the text model. For each cleaned segment, load the audio span
-   `[start - 0.3, end + 0.3]` seconds (clamped to the recording) with `load_span` and transcribe
-   it with `no_context=True`. Join the produced segments' text with a space. Emit
+3. **Pass 2.** Load the text model. For each cleaned segment, cut the span
+   `[start - 0.3, end + 0.3]` seconds (clamped to the recording) from the samples already in
+   memory (slicing; `load_span` is not called again) and transcribe it with `no_context=True`. Join the produced segments' text with a space. Emit
    `Segment(start, end, text)` with pass 1's times.
 4. **Fallbacks per segment.**
    - Pass 2 returns no text, or text that repeats (the loop test above): the segment is dropped.
@@ -65,21 +65,23 @@ that is already final, never boundaries without text.
      text but print a `check:` line in the progress output naming the segment, so the user can
      review it. Nothing is silently changed.
 5. **Language.** The language is resolved once (`resolve_language`) and passed to both passes.
-   With auto-detect, pass 1 detects it and the detected code is passed to pass 2.
+   With auto-detect, pass 1 detects it and the detected code is passed to pass 2. If the language
+   could not be detected and none is set, a hint to pass `--language` is printed and pass 2 goes on
+   with auto-detect.
 
 ## 4. Components
 
 | Unit | Responsibility | Depends on |
 |---|---|---|
-| `genea.transcribe.doublepass` (new) | `double_pass(audio_samples, structure, text, language, on_segment, say)`: steps 2 to 4 of the algorithm, as a pure function over two injected transcribers and a span loader | `Segment`, loop detection from `check.py` |
+| `genea.transcribe.doublepass` (new) | `double_pass(samples, language, make_structure, make_text, on_segment, *, say, on_structure, on_text_start)`: steps 1 to 4 of the algorithm over two injected transcriber factories, so the first model is released before the second is made | `Segment`, `find_runs` from `genea.ingest.transcript` |
 | `genea.transcribe.engine` | Unchanged; `WhisperCpp` is created once per pass | |
 | `genea.cli.transcribecmds` | New option, setting lookup, progress prefixes, calls `double_pass` when a structure model is set | `doublepass`, `make_transcriber` |
 | `genea.config` | New setting `transcribe_structure_model: str = ""` | |
 | README | Document the option and the recommended pair (`base` + `sk-large-v3-turbo`) | |
 
-`double_pass` takes the transcribers as arguments (the same `Transcriber` callable type as
-today), so it is tested without loading any model. The CLI builds the two real transcribers
-one after the other (`make_transcriber` twice); the first is dropped before the second is made.
+`double_pass` takes the two transcribers as factories (the same `Transcriber` callable type as
+today), so it is tested without loading any model. It calls the first factory, runs pass 1,
+drops the model, and only then calls the second factory.
 
 ## 5. Errors
 
