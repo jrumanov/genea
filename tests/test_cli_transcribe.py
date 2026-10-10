@@ -252,3 +252,49 @@ def test_doctor_mentions_lost_spans(kb_with_loop, monkeypatch):
     monkeypatch.setattr("genea.cli.kbcmds.run_checks", lambda settings: [])
     result = runner.invoke(app, ["--kb", str(root), "doctor"])
     assert result.exit_code == 0 and "1 of 1 have lost spans" in result.output
+
+
+def patch_conversion(monkeypatch, tmp_path, fail=None):
+    calls = []
+
+    def fake_convert(source, target, notify):
+        if fail:
+            raise fail
+        calls.append((source, target.name))
+        target.write_bytes(b"ggml")
+
+    monkeypatch.setattr("genea.cli.transcribecmds.models_dir", lambda: tmp_path)
+    monkeypatch.setattr("genea.cli.transcribecmds.convert_model", fake_convert)
+    return calls
+
+
+def test_convert_a_known_alias_names_the_model_and_says_how_to_use_it(tmp_path, monkeypatch):
+    calls = patch_conversion(monkeypatch, tmp_path)
+    result = runner.invoke(app, ["transcribe-model", "convert", "sk-medium"])
+    assert result.exit_code == 0, result.output
+    assert calls == [("kinit/whisper-medium-sk", "ggml-sk-medium.bin")]
+    assert "--model sk-medium" in result.output and (tmp_path / "ggml-sk-medium.bin").is_file()
+
+
+def test_convert_a_repository_takes_the_name_from_the_repository_or_the_option(tmp_path, monkeypatch):
+    calls = patch_conversion(monkeypatch, tmp_path)
+    assert runner.invoke(app, ["transcribe-model", "convert", "someone/whisper-small-sk"]).exit_code == 0
+    assert runner.invoke(app, ["transcribe-model", "convert", "someone/x", "--name", "mine"]).exit_code == 0
+    assert [name for _, name in calls] == ["ggml-whisper-small-sk.bin", "ggml-mine.bin"]
+
+
+def test_convert_refuses_to_replace_a_model_without_force(tmp_path, monkeypatch):
+    calls = patch_conversion(monkeypatch, tmp_path)
+    (tmp_path / "ggml-sk-medium.bin").write_bytes(b"old")
+    result = runner.invoke(app, ["transcribe-model", "convert", "sk-medium"])
+    assert result.exit_code == 1 and "--force" in result.output and calls == []
+    assert runner.invoke(app, ["transcribe-model", "convert", "sk-medium", "--force"]).exit_code == 0
+    assert len(calls) == 1
+
+
+def test_convert_failure_is_reported_without_a_traceback(tmp_path, monkeypatch):
+    from genea.transcribe.convert import ConvertError
+
+    patch_conversion(monkeypatch, tmp_path, fail=ConvertError("no network"))
+    result = runner.invoke(app, ["transcribe-model", "convert", "sk-medium"])
+    assert result.exit_code == 1 and "no network" in result.output

@@ -7,12 +7,16 @@ from collections.abc import Callable
 from pathlib import Path
 
 from genea.ingest.transcript import Segment
+from genea.transcribe.convert import ConvertError, convert_model
 
 Transcriber = Callable[..., None]  # transcriber(samples, language, on_segment); times are seconds from samples[0]
 
 EXTRA_HINT = "Transcription is not installed: run `uv sync --extra transcribe`."
 APPROX_SIZE = {"tiny": "75 MB", "base": "142 MB", "small": "466 MB", "medium": "1.5 GB",
                "large-v1": "2.9 GB", "large-v2": "2.9 GB", "large-v3": "2.9 GB", "large-v3-turbo": "1.6 GB"}
+# Slovak fine-tunes published only as Hugging Face checkpoints: converted to ggml on first use
+HF_MODELS = {"sk-medium": "kinit/whisper-medium-sk",  # slaih.sk/en/catalog/whisper-medium-sk
+             "sk-large-v3-turbo": "NaiveNeuron/whisper-large-v3-turbo-sk"}
 
 
 class ModelUnavailable(RuntimeError):
@@ -37,31 +41,44 @@ def _pywhispercpp():
     return constants, utils
 
 
+def models_dir() -> Path:
+    """Where whisper.cpp models are kept."""
+    return Path(_pywhispercpp()[0].MODELS_DIR)
+
+
 def resolve_model(name: str, notify: Callable[[str], None] = lambda message: None, *,
-                  constants=None, utils=None) -> Path:
-    """A file path is used as it is; a known model name is downloaded on first use and cached."""
+                  constants=None, utils=None, convert=convert_model) -> Path:
+    """A file path is used as it is. Otherwise `name` is a model already in the models folder (also one made by
+    `genea transcribe-model convert`), a Hugging Face model of HF_MODELS (converted on first use), or a known
+    whisper.cpp model name (downloaded on first use)."""
     path = Path(name).expanduser()
     if path.is_file():
         return path.resolve()
     if constants is None or utils is None:
         constants, utils = _pywhispercpp()
+    target = Path(constants.MODELS_DIR) / f"ggml-{name}.bin"
+    if target.is_file():
+        return target
+    if name in HF_MODELS:
+        try:
+            return convert(HF_MODELS[name], target, notify)
+        except ConvertError as exc:
+            raise ModelUnavailable(str(exc)) from exc
     if name not in constants.AVAILABLE_MODELS:
         raise ModelUnavailable(
             f"'{name}' is neither a file nor a known model name. Known names: "
-            f"{', '.join(constants.AVAILABLE_MODELS)}. Set transcribe_model to the path of a ggml .bin file "
-            "to use your own.")
-    target = Path(constants.MODELS_DIR) / f"ggml-{name}.bin"
-    if not target.is_file():
-        notify(f"Downloading model '{name}' ({APPROX_SIZE.get(name, 'size varies')}) to "
-               f"{constants.MODELS_DIR}; this happens once.")
-        try:
-            downloaded = utils.download_model(name, constants.MODELS_DIR)
-        except Exception as exc:  # noqa: BLE001 - network and disk errors alike
-            raise ModelUnavailable(_download_failed(name, constants, exc)) from exc
-        if not downloaded:
-            raise ModelUnavailable(_download_failed(name, constants, "no file was written"))
-        target = Path(downloaded)
-    return target
+            f"{', '.join([*constants.AVAILABLE_MODELS, *HF_MODELS])}. Set transcribe_model to the path of a "
+            "ggml .bin file to use your own, or make one from a Hugging Face model with "
+            "`genea transcribe-model convert`.")
+    notify(f"Downloading model '{name}' ({APPROX_SIZE.get(name, 'size varies')}) to "
+           f"{constants.MODELS_DIR}; this happens once.")
+    try:
+        downloaded = utils.download_model(name, constants.MODELS_DIR)
+    except Exception as exc:  # noqa: BLE001 - network and disk errors alike
+        raise ModelUnavailable(_download_failed(name, constants, exc)) from exc
+    if not downloaded:
+        raise ModelUnavailable(_download_failed(name, constants, "no file was written"))
+    return Path(downloaded)
 
 
 def _download_failed(name: str, constants, reason) -> str:

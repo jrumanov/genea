@@ -13,6 +13,8 @@ app.add_typer(summaries_app, name="summaries")
 transcripts_app = typer.Typer(no_args_is_help=True,
                               help="Find and repair recordings whose transcript lost part of the speech.")
 app.add_typer(transcripts_app, name="transcripts")
+transcribe_model_app = typer.Typer(no_args_is_help=True, help="Prepare Whisper models for `genea transcribe`.")
+app.add_typer(transcribe_model_app, name="transcribe-model")
 
 
 @app.callback()

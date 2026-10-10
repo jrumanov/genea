@@ -1,4 +1,4 @@
-"""`genea transcribe` and `genea transcripts check / repair`."""
+"""`genea transcribe`, `genea transcribe-model convert` and `genea transcripts check / repair`."""
 
 from __future__ import annotations
 
@@ -9,16 +9,19 @@ import typer
 from rich.markup import escape
 
 from genea.cli import common
-from genea.cli.app import app, transcripts_app
+from genea.cli.app import app, transcribe_model_app, transcripts_app
 from genea.config import KBNotFound, Settings, load_settings, resolve_kb_root
 from genea.ingest.transcript import Segment, format_time
 from genea.transcribe.audio import SAMPLE_RATE, AudioUnavailable, audio_duration, load_span
 from genea.transcribe.check import check_file, describe_span, transcripts
+from genea.transcribe.convert import ConvertError, convert_model
 from genea.transcribe.engine import (
+    HF_MODELS,
     ModelUnavailable,
     Transcriber,
     WhisperCpp,
     language_label,
+    models_dir,
     resolve_language,
     resolve_model,
 )
@@ -48,8 +51,9 @@ def _settings(ctx: typer.Context) -> Settings:
     return load_settings(root)
 
 
-MODEL_OPTION = typer.Option(None, "--model", help="Model name (downloaded on first use) or path of a ggml .bin; "
-                                                   "default: transcribe_model.")
+MODEL_OPTION = typer.Option(None, "--model", help="Model name (downloaded or, for sk-medium and "
+                                                   "sk-large-v3-turbo, converted on first use) or path of a ggml "
+                                                   ".bin; default: transcribe_model.")
 LANGUAGE_OPTION = typer.Option(None, "--language", help="Language code such as sk; default: transcribe_language, "
                                                          "and when that is empty, auto-detect.")
 
@@ -101,6 +105,28 @@ def transcribe(
     except OSError as exc:
         raise _fail(f"Could not rename {part} to {target.name}: {exc}") from exc
     say(progress.summary(target))
+
+
+@transcribe_model_app.command("convert")
+def convert(
+    source: str = typer.Argument(..., help="Hugging Face model (owner/name, or sk-medium / sk-large-v3-turbo) "
+                                           "or a folder holding a downloaded safetensors checkpoint."),
+    name: str | None = typer.Option(None, "--name", help="Name of the converted model (default: the short name "
+                                                         "or the last part of SOURCE)."),
+    force: bool = typer.Option(False, "--force", help="Replace an existing converted model."),
+) -> None:
+    """Convert a Hugging Face Whisper checkpoint to the ggml file whisper.cpp loads; then use its name as --model."""
+    repo = HF_MODELS.get(source, source)
+    name = name or (source if source in HF_MODELS else Path(repo.rstrip("/\\")).name)
+    try:
+        target = models_dir() / f"ggml-{name}.bin"
+        if target.exists() and not force:
+            raise _fail(f"{target} already exists; pass --force to replace it.")
+        convert_model(repo, target, say)
+    except (ModelUnavailable, ConvertError) as exc:
+        raise _fail(str(exc)) from exc
+    say(f"Done: {target}")
+    say(f"Use it with `--model {name}` or set transcribe_model = \"{name}\".")
 
 
 @transcripts_app.command()
