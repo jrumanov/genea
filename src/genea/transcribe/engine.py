@@ -90,6 +90,8 @@ def _download_failed(name: str, constants, reason) -> str:
 class WhisperCpp:
     """The real transcriber. Loading the model takes a few seconds; one instance is used per run."""
 
+    detected_language = ""  # set by a call that auto-detected the language, so a second pass can reuse it
+
     def __init__(self, model_path: Path, say: Callable[[str], None] = lambda message: None) -> None:
         try:
             from pywhispercpp.model import Model
@@ -100,6 +102,7 @@ class WhisperCpp:
                             print_realtime=False, redirect_whispercpp_logs_to=os.devnull)
 
     def __call__(self, samples, language: str, on_segment: Callable[[Segment], None]) -> None:
+        self.detected_language = ""
         if not language:
             try:
                 detected = self._model.auto_detect_language(samples)[0][0]
@@ -108,6 +111,7 @@ class WhisperCpp:
             if detected:
                 self._say(f"Detected language: {detected}")
                 language = detected  # passed on, so whisper.cpp does not detect it a second time
+                self.detected_language = detected
 
         def callback(segment) -> None:
             text = segment.text.strip()

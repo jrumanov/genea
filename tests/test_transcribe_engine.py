@@ -167,3 +167,16 @@ def test_a_failed_detection_leaves_it_to_whisper_cpp_and_a_set_language_skips_it
     transcriber, _ = whisper_with(model)
     transcriber([0.0], "cs", lambda s: None)
     assert model.calls == [("transcribe", "cs")]
+
+
+def test_the_detected_language_is_kept_for_the_next_pass():
+    transcriber, _ = whisper_with(FakeModel("sk"))
+    assert transcriber.detected_language == ""
+    transcriber([0.0] * 10, "", lambda s: None)
+    assert transcriber.detected_language == "sk"
+    transcriber, _ = whisper_with(FakeModel(fails=True))
+    transcriber([0.0], "", lambda s: None)
+    assert transcriber.detected_language == ""  # detection failed: nothing to pass on
+    transcriber, _ = whisper_with(FakeModel("sk"))
+    transcriber([0.0], "cs", lambda s: None)
+    assert transcriber.detected_language == ""  # a fixed language is not "detected"
