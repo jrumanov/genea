@@ -130,6 +130,7 @@ changes to `.genea/changes/pending/`. Review them with `genea changes show <id>`
 | `summary_model` | `""` | Ollama model for transcript summaries (empty: the chat model, if it is an `ollama:` one) |
 | `transcribe_model` | `medium` | whisper.cpp model for `genea transcribe` / `transcripts repair` (a name, `sk-small`, `sk-medium`, `sk-large-v3-turbo`, or the path of a ggml `.bin`) |
 | `transcribe_language` | `""` | Language code such as `sk`; empty means auto-detect |
+| `transcribe_structure_model` | `""` | Small model for the double pass of `genea transcribe` (for example `base`); empty means a single pass |
 
 ## Transcripts
 
@@ -188,6 +189,15 @@ convert` does the same ahead of time, and also converts any other Whisper reposi
 (`genea transcribe-model convert owner/name`, then `--model name`). The download is cached by Hugging Face, so
 delete `~/.cache/huggingface` afterwards if you need the 1.5-3 GB. These models tend to write one long segment per
 30 seconds instead of short timestamped ones, so the `@time` citations of such a transcript are coarser.
+
+**Double pass.** The Slovak fine-tunes write the better words, but the generic models cut segments better, at
+the places where the speaker or the sentence changes. `genea transcribe rec.m4a --structure-model base --model
+sk-large-v3-turbo --language sk` runs the small model first to find the segment boundaries, then the fine-tune on
+the audio of each segment, and writes the first model's times with the second model's text (or set
+`transcribe_structure_model` and `transcribe_model`; `--structure-model ""` switches it off again). A segment
+for which the fine-tune hears nothing or loops is left out, and a segment whose text is very different in
+length from the first pass is kept but listed as `check:` in the output. It takes about one run of the large model
+plus a quick run of the small one. Speaker labels are not produced: Whisper does not tell speakers apart.
 
 ## Privacy
 

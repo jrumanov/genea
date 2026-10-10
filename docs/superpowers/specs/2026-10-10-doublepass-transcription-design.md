@@ -1,7 +1,7 @@
 # Double-pass transcription — Design
 
 Date: 2026-10-10
-Status: Draft, awaiting review
+Status: Implemented (see the plan 2026-10-10-doublepass-transcription.md); the manual comparison decides the recommended structure model and the thresholds in section 7
 
 ## 1. Goal
 
