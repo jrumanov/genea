@@ -64,3 +64,11 @@ def test_transcribe_defaults_and_overrides(isolated_home, tmp_path):
         'transcribe_model = "large-v3"\ntranscribe_language = "sk"\n', encoding="utf-8")
     s = load_settings(kb)
     assert (s.transcribe_model, s.transcribe_language) == ("large-v3", "sk")
+
+
+def test_structure_model_is_off_by_default_and_can_be_set(isolated_home, tmp_path):
+    assert load_settings(None).transcribe_structure_model == ""
+    kb = tmp_path / "kb"
+    (kb / ".genea").mkdir(parents=True)
+    (kb / ".genea" / "config.toml").write_text('transcribe_structure_model = "base"\n', encoding="utf-8")
+    assert load_settings(kb).transcribe_structure_model == "base"

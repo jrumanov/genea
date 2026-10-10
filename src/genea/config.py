@@ -24,6 +24,7 @@ class Settings:
     summary_model: str = ""  # Ollama model for transcript summaries; empty: the chat model, if it is an ollama: one
     transcribe_model: str = "medium"  # whisper.cpp model name (downloaded on first use) or path to a ggml .bin
     transcribe_language: str = ""  # language code such as "sk"; empty or "auto": whisper.cpp detects it
+    transcribe_structure_model: str = ""  # small model whose segment boundaries the double pass keeps; empty: off
 
 
 class KBNotFound(Exception):
