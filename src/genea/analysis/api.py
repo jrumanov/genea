@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import math
+from typing import Any
 
 from genea.analysis import store
 from genea.analysis.detectors import detect
-from genea.analysis.models import (PAGE_SIZE, SEVERITIES, Analysis, AnalysisList, AnalysisPage, AnalysisSummary,
-                                   FindingView)
+from genea.analysis.models import (PAGE_SIZE, SEVERITIES, Analysis, AnalysisList, AnalysisNote, AnalysisPage,
+                                   AnalysisSummary, AnalysisUpdate, FindingView, Proposal, parse_cite)
 from genea.analysis.report import STATE_WARNINGS, render_report
 from genea.analysis.scope import resolve_scope
+from genea.changes.store import ChangeError, validate_change
 from genea.index.progress import index_state
-from genea.tools.base import ToolContext, ToolError, person_id
+from genea.ingest.gedcom.mapper import INDIVIDUAL_EVENT_TAGS
+from genea.tools.base import ToolContext, ToolError, parse_family_id, parse_person_id, person_id
 
 
 def tree_hash(ctx: ToolContext, ged_file: str) -> str:
@@ -84,3 +87,140 @@ def _page(ctx: ToolContext, analysis: Analysis, page: int, severity: str | None)
         proposals=proposals, report=ctx.kb.rel(folder / "report.md"),
         message=STATE_WARNINGS.get(analysis.index_state), sources=sources,
     )
+
+
+NOTE_LIMIT = 4000  # characters of one analysis note
+
+
+def _save(ctx: ToolContext, analysis: Analysis) -> None:
+    analysis.updated = store.now()
+    store.save(ctx.kb, analysis)
+    write_report(ctx, analysis)
+
+
+def _require_fresh(ctx: ToolContext, analysis: Analysis) -> None:
+    """Proposals carry line numbers from the index, so the index must match the tree and the analysis."""
+    digest = tree_hash(ctx, analysis.ged_file)
+    if tree_index_state(ctx, analysis.ged_file, digest) != "ready":
+        raise ToolError("The index does not match the tree (it changed after indexing, or indexing is not "
+                        "complete). Run `genea index`, then analyze again before proposing.")
+    if digest != analysis.base_hash:
+        raise ToolError(f"The tree changed after this analysis was made. Run analyze again for "
+                        f"{analysis.scope.kind} {analysis.scope.id} first.")
+
+
+def _check_ids(ctx: ToolContext, analysis: Analysis, operation: str, payload: dict[str, Any]) -> None:
+    """Normalize ids to 'file#@X@' and check they exist in the analysed tree."""
+    ged = analysis.ged_file
+    for key in ("person_id", "child_id"):
+        value = payload.get(key)
+        if not value:
+            continue
+        if key == "child_id" and str(value).startswith("proposal:"):
+            ref = str(value).split(":", 1)[1]
+            if not any(p.id == ref and p.operation == "add_person" and p.status == "active"
+                       for p in analysis.proposals):
+                raise ToolError(f"{value} is not an active add_person proposal of this analysis.")
+            continue
+        file, xref = parse_person_id(ctx, str(value))
+        if file != ged:
+            raise ToolError(f"{value} is not in {ged}, the tree of this analysis.")
+        payload[key] = person_id(file, xref)
+    if payload.get("family_id"):
+        file, xref = parse_family_id(ctx, str(payload["family_id"]))
+        if file != ged:
+            raise ToolError(f"{payload['family_id']} is not in {ged}, the tree of this analysis.")
+        payload["family_id"] = person_id(file, xref)
+    if operation == "add_event" and payload["type"] not in INDIVIDUAL_EVENT_TAGS:
+        raise ToolError(f"{payload['type']!r} is not an individual event tag; use one of "
+                        f"{', '.join(sorted(INDIVIDUAL_EVENT_TAGS))}.")
+    if operation == "add_person" and payload.get("sex") not in (None, "", "M", "F", "U"):
+        raise ToolError("sex must be M, F or U.")
+
+
+def _anchor(ctx: ToolContext, payload: dict[str, Any]) -> dict[str, str | None]:
+    ged, xref = parse_person_id(ctx, payload["person_id"])
+    try:
+        line = int(payload["line"])
+    except (TypeError, ValueError):
+        raise ToolError("line must be the GEDCOM line number of the event (get_person lists it).") from None
+    row = ctx.conn.execute("SELECT type, date_raw, place FROM events WHERE ged_file = ? AND owner_xref = ? "
+                           "AND line_no = ?", (ged, xref, line)).fetchone()
+    if row is None:
+        raise ToolError(f"Line {line} is not an event of {payload['person_id']}; get_person lists its events "
+                        "with their lines.")
+    if not payload.get("date") and not payload.get("place"):
+        raise ToolError("update_event needs a new date or place.")
+    payload["line"] = line
+    return {"type": row["type"], "date": row["date_raw"], "place": row["place"]}
+
+
+def propose(ctx: ToolContext, name: str, operation: str, payload: dict[str, Any], sources: list[str],
+            rationale: str, finding_id: str | None = None, author: str = "user") -> AnalysisUpdate:
+    analysis = store.load(ctx.kb, name)
+    _require_fresh(ctx, analysis)
+    if finding_id is not None and finding_id not in {f.id for f in analysis.findings}:
+        raise ToolError(f"No finding {finding_id} in {name}.")
+    if not (rationale or "").strip():
+        raise ToolError("Give a rationale: why is this change right?")
+    refs = [parse_cite(s) for s in sources or []]
+    if not refs:
+        raise ToolError("Cite at least one source, like [docs/matrika.pdf p.3].")
+    for ref in refs:
+        if ctx.conn.execute("SELECT 1 FROM files WHERE path = ?", (ref.file,)).fetchone() is None:
+            raise ToolError(f"{ref.file} is not an indexed file of this knowledge base; cite what the tools returned.")
+    payload = dict(payload or {})
+    try:
+        validate_change(ctx.kb, "gedcom", analysis.ged_file, operation, payload)
+    except ChangeError as exc:
+        raise ToolError(str(exc)) from exc
+    _check_ids(ctx, analysis, operation, payload)
+    anchor = _anchor(ctx, payload) if operation == "update_event" else None
+    for p in analysis.proposals:
+        if p.status == "active" and p.operation == operation and p.payload == payload:
+            return AnalysisUpdate(name=name, proposal_id=p.id, status=p.status, sources=p.sources,
+                                  message=f"An identical proposal already exists ({p.id}); not recorded again.")
+    proposal = Proposal(id=f"p-{len(analysis.proposals) + 1}", finding_id=finding_id, author=author,
+                        operation=operation, payload=payload, anchor=anchor, sources=refs,
+                        rationale=rationale.strip(), created=store.now())
+    analysis.proposals.append(proposal)
+    _save(ctx, analysis)
+    return AnalysisUpdate(name=name, proposal_id=proposal.id, status=proposal.status, sources=refs,
+                          message=f"Recorded {proposal.id}. The tree is unchanged; build_iteration writes a copy "
+                                  "with all active proposals applied.")
+
+
+def withdraw(ctx: ToolContext, name: str, proposal_id: str) -> AnalysisUpdate:
+    analysis = store.load(ctx.kb, name)
+    proposal = next((p for p in analysis.proposals if p.id == proposal_id), None)
+    if proposal is None:
+        raise ToolError(f"No proposal {proposal_id} in {name}.")
+    users = [p.id for p in analysis.proposals
+             if p.status != "withdrawn" and p.payload.get("child_id") == f"proposal:{proposal_id}"]
+    if users:
+        raise ToolError(f"{', '.join(users)} link(s) this new person; withdraw {users[0]} first.")
+    proposal.status = "withdrawn"
+    _save(ctx, analysis)
+    return AnalysisUpdate(name=name, proposal_id=proposal_id, status="withdrawn",
+                          message=f"Withdrew {proposal_id}.")
+
+
+def dismiss(ctx: ToolContext, name: str, finding_id: str, reason: str = "") -> AnalysisUpdate:
+    analysis = store.load(ctx.kb, name)
+    if finding_id not in {f.id for f in analysis.findings}:
+        raise ToolError(f"No finding {finding_id} in {name}.")
+    analysis.dismissed[finding_id] = (reason or "").strip()
+    _save(ctx, analysis)
+    return AnalysisUpdate(name=name, status="dismissed", message=f"Dismissed {finding_id}.")
+
+
+def add_note(ctx: ToolContext, name: str, text: str) -> AnalysisUpdate:
+    text = (text or "").strip()
+    if not text:
+        raise ToolError("The note is empty.")
+    if len(text) > NOTE_LIMIT:
+        raise ToolError(f"Keep a note under {NOTE_LIMIT} characters.")
+    analysis = store.load(ctx.kb, name)
+    analysis.notes.append(AnalysisNote(created=store.now(), text=text))
+    _save(ctx, analysis)
+    return AnalysisUpdate(name=name, message="Note added to the report.")

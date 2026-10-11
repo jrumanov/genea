@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import NoReturn
 
 import typer
@@ -79,3 +80,38 @@ def show(ctx: typer.Context, name: str,
          page: int = typer.Option(1, help="Page of findings")) -> None:
     """Show the findings of an analysis."""
     _print_page(_with_tools(ctx, api.read_analysis, name, severity, page))
+
+
+@analysis_app.command()
+def propose(
+    ctx: typer.Context,
+    name: str,
+    operation: str = typer.Option(..., help="add_event, update_event, add_note, add_source_citation, "
+                                            "link_child or add_person"),
+    payload: str = typer.Option(..., help='JSON object, e.g. \'{"person_id": "tree.ged#@I3@", "text": "..."}\''),
+    source: list[str] = typer.Option(..., "--source", help="A citation like [docs/matrika.pdf p.3]; repeatable"),
+    rationale: str = typer.Option(..., help="Why the change is right"),
+    finding: str | None = typer.Option(None, help="The finding id this proposal answers"),
+) -> None:
+    """Record a proposed change in an analysis. The tree is not changed."""
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        _fail(ToolError(f"--payload is not valid JSON: {exc}"))
+    if not isinstance(data, dict):
+        _fail(ToolError("--payload must be a JSON object"))
+    result = _with_tools(ctx, api.propose, name, operation, data, source, rationale, finding, "user")
+    common.console.print(escape(result.message))
+
+
+@analysis_app.command()
+def withdraw(ctx: typer.Context, name: str, proposal_id: str) -> None:
+    """Withdraw a proposal; later iterations leave it out."""
+    common.console.print(escape(_with_tools(ctx, api.withdraw, name, proposal_id).message))
+
+
+@analysis_app.command()
+def dismiss(ctx: typer.Context, name: str, finding_id: str,
+            reason: str = typer.Option("", help="Why the finding is not a problem")) -> None:
+    """Mark a finding as not a problem; it gets no CHECK note and stays dismissed on re-runs."""
+    common.console.print(escape(_with_tools(ctx, api.dismiss, name, finding_id, reason).message))
