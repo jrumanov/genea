@@ -75,7 +75,7 @@ def families_as_child(conn, ged, xref) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def _children_in(conn, ged, family_xref) -> list[str]:
+def children_in(conn, ged, family_xref) -> list[str]:
     return [r[0] for r in conn.execute(
         "SELECT child_xref FROM family_children WHERE ged_file = ? AND family_xref = ? ORDER BY rowid",
         (ged, family_xref))]
@@ -90,7 +90,7 @@ def parents_of(conn, ged, xref) -> list[str]:
 
 
 def children_of(conn, ged, xref) -> list[str]:
-    return _unique(c for f in families_as_spouse(conn, ged, xref) for c in _children_in(conn, ged, f["xref"]))
+    return _unique(c for f in families_as_spouse(conn, ged, xref) for c in children_in(conn, ged, f["xref"]))
 
 
 def spouses_of(conn, ged, xref) -> list[str]:
@@ -100,7 +100,7 @@ def spouses_of(conn, ged, xref) -> list[str]:
 
 def siblings_of(conn, ged, xref) -> list[str]:
     return _unique(c for f in families_as_child(conn, ged, xref)
-                   for c in _children_in(conn, ged, f["xref"]) if c != xref)
+                   for c in children_in(conn, ged, f["xref"]) if c != xref)
 
 
 def find_person(ctx: ToolContext, name: str, born_around: int | None = None,

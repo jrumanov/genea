@@ -60,3 +60,17 @@ def tools_with_images(kb_with_images):
     ctx = open_tools(kb_with_images, FakeEmbedder())
     yield ctx
     ctx.conn.close()
+
+
+@pytest.fixture
+def analysis_kb(tmp_path):
+    from fixtures.analysis_tree import make_analysis_kb
+
+    return make_analysis_kb(tmp_path / "akb")
+
+
+@pytest.fixture
+def actx(analysis_kb):
+    ctx = open_tools(analysis_kb, FakeEmbedder())
+    yield ctx
+    ctx.conn.close()
