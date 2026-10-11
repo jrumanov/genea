@@ -58,7 +58,8 @@ def test_other_operations(actx, analysis_kb):
     assert "1 NOTE Mlynár\n1 NOTE GENEA v1" in text
     assert "1 DEAT\n2 DATE 1910\n2 SOUR Matrika Brno\n2 SOUR Matrika Brno 1850\n3 PAGE f. 12\n2 NOTE GENEA v1" in text
     assert "1 BAPM\n2 DATE 3 JUN 1878\n2 PLAC Brno\n2 NOTE GENEA v1" in text
-    assert "0 @GENEA1@ INDI\n1 NAME Mária /Weiss/\n1 SEX F\n1 BIRT\n2 DATE 1883\n1 FAMC @F1@\n1 NOTE GENEA v1" in text
+    assert "0 @GENEA1@ INDI\n1 NAME Mária /Weiss/\n1 SEX F\n1 BIRT\n2 DATE 1883\n1 NOTE GENEA v1" in text
+    assert "1 FAMC @F1@\n0 TRLR" in text  # written by link_child, at the end of the new record
     assert "1 CHIL @I5@\n1 CHIL @GENEA1@\n1 NOTE GENEA v1" in text
     assert text.index("0 @GENEA1@ INDI") < text.index("0 TRLR")
 
@@ -171,7 +172,22 @@ def test_writes_only_inside_the_analysis_folder(actx, analysis_kb):
     assert changed and all(k.startswith(f".genea/analyses/{name}/") for k in changed)
 
 
-def test_two_updates_of_one_event_second_is_stale(actx, analysis_kb):
+def test_two_updates_of_one_field_second_is_stale(actx, analysis_kb):
+    name = _family(actx)
+    line = event_line(actx, "@I4@", "BIRT")  # no PLAC: a second place must not add a second PLAC line
+    api.propose(actx, name, "update_event", {"person_id": "tree.ged#@I4@", "line": line, "place": "Brno"},
+                CITE, "why")
+    api.propose(actx, name, "update_event", {"person_id": "tree.ged#@I4@", "line": line, "place": "Viedeň"},
+                CITE, "why")
+    result = api.build_iteration(actx, name)
+    assert result.applied == ["p-1"] and result.stale == ["p-2"]
+    reason = store.load(analysis_kb, name).proposals[1].stale_reason
+    assert "place of the BIRT event is already changed by p-1" in reason
+    text = (analysis_kb.root / result.iteration).read_text(encoding="utf-8")
+    assert "Viedeň" not in text and "1 BIRT\n2 PLAC Brno\n2 DATE 1 JUN 1878\n2 NOTE GENEA v1" in text
+
+
+def test_date_and_place_updates_of_one_event_both_apply(actx, analysis_kb):
     name = _family(actx)
     line = event_line(actx, "@I3@", "BIRT")
     api.propose(actx, name, "update_event", {"person_id": "tree.ged#@I3@", "line": line, "date": "2 JAN 1878"},
@@ -179,10 +195,9 @@ def test_two_updates_of_one_event_second_is_stale(actx, analysis_kb):
     api.propose(actx, name, "update_event", {"person_id": "tree.ged#@I3@", "line": line, "place": "Viedeň"},
                 CITE, "why")
     result = api.build_iteration(actx, name)
-    assert result.applied == ["p-1"] and result.stale == ["p-2"]
-    assert "already changed by p-1" in store.load(analysis_kb, name).proposals[1].stale_reason
+    assert result.applied == ["p-1", "p-2"] and result.stale == []
     text = (analysis_kb.root / result.iteration).read_text(encoding="utf-8")
-    assert "Viedeň" not in text and text.count("2 PLAC Brno") == 2
+    assert "1 BIRT\n2 DATE 2 JAN 1878\n2 PLAC Viedeň\n" in text and text.count("2 NOTE GENEA v1") == 2
 
 
 def test_deleted_person_skips_its_check_note(actx, analysis_kb):
@@ -219,3 +234,84 @@ def test_failed_proposal_leaves_no_partial_edit(tmp_path):
     assert result.stale == ["p-1"]
     built = (kb.root / result.iteration).read_bytes().decode("cp1250")
     assert "2 DATE 1 JAN 1878" in built and "2 JAN 1878" not in built and "GENEA v1" not in built
+
+
+def _shifted(kb, xref, extra):
+    path = kb.root / "tree.ged"
+    path.write_text(path.read_text(encoding="utf-8").replace(f"0 {xref} INDI\n", f"0 {xref} INDI\n{extra}"),
+                    encoding="utf-8")
+
+
+DUP_BIRT = TREE.replace("1 BIRT\n2 DATE 1 JUN 1878\n", "1 BIRT\n2 DATE 1 JUN 1878\n1 BIRT\n2 DATE 1 JUN 1878\n")
+
+
+def test_duplicate_event_shifted_by_its_subtree_size_is_stale(tmp_path):
+    kb = make_analysis_kb(tmp_path / "dup2", DUP_BIRT)
+    ctx = open_tools(kb, FakeEmbedder())
+    name = api.analyze(ctx, "person", "tree.ged#@I4@").name
+    second = event_line(ctx, "@I4@", "BIRT") + 2
+    api.propose(ctx, name, "update_event", {"person_id": "tree.ged#@I4@", "line": second, "date": "2 JUN 1878"},
+                CITE, "why")
+    _shifted(kb, "@I4@", "1 NOTE posun\n1 NOTE posun\n")  # the old line now points at the first BIRT
+    result = api.build_iteration(ctx, name)
+    ctx.conn.close()
+    assert result.stale == ["p-1"]
+    assert "more than once" in store.load(kb, name).proposals[0].stale_reason
+
+
+def test_duplicate_event_in_an_unchanged_tree_uses_the_recorded_line(tmp_path):
+    kb = make_analysis_kb(tmp_path / "dup3", DUP_BIRT)
+    ctx = open_tools(kb, FakeEmbedder())
+    name = api.analyze(ctx, "person", "tree.ged#@I4@").name
+    second = event_line(ctx, "@I4@", "BIRT") + 2
+    api.propose(ctx, name, "update_event", {"person_id": "tree.ged#@I4@", "line": second, "date": "2 JUN 1878"},
+                CITE, "why")
+    result = api.build_iteration(ctx, name)
+    ctx.conn.close()
+    assert result.applied == ["p-1"]
+    text = (kb.root / result.iteration).read_text(encoding="utf-8")
+    assert "1 BIRT\n2 DATE 1 JUN 1878\n1 BIRT\n2 DATE 2 JUN 1878\n" in text
+
+
+def test_event_with_another_value_is_not_taken(tmp_path):
+    tree = TREE.replace("0 @I4@ INDI\n", "0 @I4@ INDI\n1 OCCU farmer\n1 OCCU teacher\n")
+    kb = make_analysis_kb(tmp_path / "occu", tree)
+    ctx = open_tools(kb, FakeEmbedder())
+    name = api.analyze(ctx, "person", "tree.ged#@I4@").name
+    teacher = event_line(ctx, "@I4@", "OCCU") + 1
+    api.propose(ctx, name, "update_event", {"person_id": "tree.ged#@I4@", "line": teacher, "date": "1900"},
+                CITE, "why")
+    assert store.load(kb, name).proposals[0].anchor["description"] == "teacher"
+    _shifted(kb, "@I4@", "1 NOTE posun\n")  # the old line now points at OCCU farmer
+    result = api.build_iteration(ctx, name)
+    ctx.conn.close()
+    assert result.applied == ["p-1"]
+    text = (kb.root / result.iteration).read_text(encoding="utf-8")
+    assert "1 OCCU farmer\n1 OCCU teacher\n2 DATE 1900\n2 NOTE GENEA v1" in text
+
+
+def test_empty_place_still_fits(tmp_path):
+    kb = make_analysis_kb(tmp_path / "empty", TREE.replace("2 DATE 1 JUN 1878\n", "2 DATE 1 JUN 1878\n2 PLAC \n"))
+    ctx = open_tools(kb, FakeEmbedder())
+    name = api.analyze(ctx, "person", "tree.ged#@I4@").name
+    api.propose(ctx, name, "update_event", {"person_id": "tree.ged#@I4@", "line": event_line(ctx, "@I4@", "BIRT"),
+                                            "date": "2 JUN 1878"}, CITE, "why")
+    assert store.load(kb, name).proposals[0].anchor["place"] is None
+    result = api.build_iteration(ctx, name)
+    ctx.conn.close()
+    assert result.applied == ["p-1"] and result.stale == []
+
+
+def test_failed_link_of_a_new_person_leaves_no_famc(tmp_path):
+    kb = make_analysis_kb(tmp_path / "ansi3", TREE.replace("1 CHAR UTF-8", "1 CHAR ANSI"), encoding="cp1250")
+    ctx = open_tools(kb, FakeEmbedder())
+    name = api.analyze(ctx, "family", "tree.ged#@F1@").name
+    person = api.propose(ctx, name, "add_person", {"given": "Mária", "surname": "Weiss"}, CITE, "why")
+    api.propose(ctx, name, "link_child", {"family_id": "tree.ged#@F1@", "child_id": f"proposal:{person.proposal_id}"},
+                CITE, "запис")  # the marker cannot be written in CP1250
+    result = api.build_iteration(ctx, name)
+    ctx.conn.close()
+    assert result.applied == ["p-1"] and result.stale == ["p-2"]
+    text = (kb.root / result.iteration).read_bytes().decode("cp1250")
+    assert "0 @GENEA1@ INDI" in text and "FAMC" not in text.split("0 @GENEA1@ INDI")[1]
+    assert "CHIL @GENEA1@" not in text

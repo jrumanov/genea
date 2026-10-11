@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from datetime import datetime
@@ -31,11 +32,14 @@ def analysis_dir(kb: KnowledgeBase, name: str) -> Path:
     return path
 
 
-def scope_name(ged_file: str, spec: ScopeSpec) -> str:
+def scope_name(ged_file: str, spec: ScopeSpec, unique: bool = False) -> str:
+    """'tree-person-I12'. `unique` adds a short hash of the tree's path, for a second tree with the same file name."""
     stem = re.sub(r"[^\w.-]", "_", Path(ged_file).stem)
     xref = spec.id.split("#", 1)[1].strip("@")
     name = f"{stem}-{spec.kind}-{xref}"
-    return f"{name}-{spec.direction}-{spec.depth}" if spec.kind == "branch" else name
+    if spec.kind == "branch":
+        name = f"{name}-{spec.direction}-{spec.depth}"
+    return f"{name}-{hashlib.sha256(ged_file.encode('utf-8')).hexdigest()[:6]}" if unique else name
 
 
 def write_atomic(path: Path, data: str | bytes) -> None:

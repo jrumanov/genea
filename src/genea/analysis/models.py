@@ -34,13 +34,17 @@ class Finding(BaseModel):
     sources: list[SourceRef] = Field(default_factory=list)
 
 
+Operation = Literal["add_event", "update_event", "add_note", "add_source_citation", "link_child", "add_person"]
+
+
 class Proposal(BaseModel):
     id: str
     finding_id: str | None = None
     author: Literal["claude", "user"]
-    operation: str
+    operation: Operation  # a closed list: build calls the builder method of this name
     payload: dict[str, Any]
-    anchor: dict[str, str | None] | None = None  # update_event: the event as it was {type, date, place}
+    anchor: dict[str, str | None] | None = None  # update_event: the event as it was {type, description, date, place}
+    base_hash: str | None = None  # sha256 of the tree the proposal was made against (None: made before it was kept)
     sources: list[SourceRef]
     rationale: str
     created: str

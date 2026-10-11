@@ -26,9 +26,11 @@ to read image metadata and to write XMP sidecars. `genea doctor` diagnoses all o
 
 ## Use with Claude (MCP)
 
-`genea mcp` serves the knowledge base to Claude Code or Claude Desktop as a **read-only** MCP server
-(search, people, relatives, timelines, documents, photos, conflict checks). Notes and proposed changes
-still go through the `genea` CLI.
+`genea mcp` serves the knowledge base to Claude Code or Claude Desktop as an MCP server (search, people,
+relatives, timelines, documents, photos, conflict checks). It is read-only except for analyses, which it
+writes only under `.genea/analyses/`: the tools `analyze`, `read_analysis`, `propose`, `withdraw`,
+`add_analysis_note` and `build_iteration` (see [Analyses](#analyses-proposing-corrections-to-the-tree)).
+The tree itself is never changed, and dismissing a finding is CLI only.
 
 ```bash
 uv sync --extra mcp
@@ -126,12 +128,15 @@ never guess a value.
 Corrections are **proposals** with citations and a reason, recorded by Claude (`propose`) or by you
 (`genea analysis propose`). `genea analysis build <name>` (MCP `build_iteration`) then writes
 `.genea/analyses/<name>/vN.ged`: a full copy of the real tree with every active proposal applied, each marked
-by a `NOTE` starting `GENEA vN`. Problems nobody has decided on get a `GENEA CHECK` note. Next to it are
-`vN.diff` and `vN.md` (the report with each change's diff).
+by a `NOTE` starting `GENEA vN`. Conflicts (`error` and `needs_review` findings) nobody has decided on get a
+`GENEA CHECK` note; gaps (`info` findings) are listed in the report only. Next to it are `vN.diff` and `vN.md`
+(the report with each change's diff).
 
 - The real `.ged` is never changed. Each iteration is rebuilt from it, so v2 does not contain v1's notes.
-- If the tree changed since a proposal was made (a new Gramps export), the proposal is re-found by its event;
-  if that is not possible it is marked stale and left out, never applied to the wrong line.
+- If the tree changed since a proposal was made (a new Gramps export), an `update_event` proposal is re-found by
+  its event (type, value, date and place); if that is not possible, or the event is in the record more than
+  once, it is marked stale and left out, never applied to the wrong line. Other operations are located by the
+  person's or family's xref (stale if that record is gone).
 - `genea analysis dismiss <name> <finding>` marks a finding as not a problem (only you can do this).
 - Only UTF-8 and ANSI (CP1250) trees can be written; export from Gramps as UTF-8.
 - An iteration cannot be imported into Gramps (Gramps would duplicate everyone). Review the diff and enter the

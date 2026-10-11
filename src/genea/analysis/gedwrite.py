@@ -94,6 +94,18 @@ class GedEditor:
         self._new.extend(lines)
         self._log([f"+{line}" for line in lines])
 
+    def append_to_new(self, xref: str, lines: list[str]) -> None:
+        """Add lines at the end of a record added by add_record (the one starting '0 <xref> ')."""
+        head = f"0 {xref} "
+        try:
+            start = next(i for i, line in enumerate(self._new) if line.startswith(head))
+        except StopIteration:
+            raise GedWriteError(f"{xref} is not a new record") from None
+        end = next((i for i in range(start + 1, len(self._new)) if self._new[i].startswith("0 ")), len(self._new))
+        self._check(lines)
+        self._new[end:end] = lines
+        self._log([f" {self._new[start]}"] + [f"+{line}" for line in lines])
+
     def snapshot(self):
         return ({k: list(v) for k, v in self._after.items()}, dict(self._replace), list(self._new),
                 {k: list(v) for k, v in self.log.items()})

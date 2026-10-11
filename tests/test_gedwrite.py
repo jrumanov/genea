@@ -61,6 +61,20 @@ def test_new_records_go_before_trlr(tmp_path):
     assert "@GENEA1@" not in editor.xrefs() and "@I1@" in editor.xrefs()
 
 
+def test_append_to_a_new_record(tmp_path):
+    editor = GedEditor(_doc(tmp_path, SMALL))
+    editor.add_record(["0 @GENEA1@ INDI", "1 NAME C /D/"])
+    editor.add_record(["0 @GENEA2@ INDI", "1 NAME E /F/"])
+    snap = editor.snapshot()
+    editor.append_to_new("@GENEA1@", ["1 FAMC @F1@"])
+    assert editor.serialize().endswith(b"0 @GENEA1@ INDI\r\n1 NAME C /D/\r\n1 FAMC @F1@\r\n0 @GENEA2@ INDI\r\n"
+                                       b"1 NAME E /F/\r\n0 TRLR\r\n")
+    editor.restore(snap)
+    assert b"FAMC" not in editor.serialize()
+    with pytest.raises(GedWriteError, match="not a new record"):
+        editor.append_to_new("@I1@", ["1 FAMC @F1@"])
+
+
 def test_no_trlr_and_no_final_newline(tmp_path):
     editor = GedEditor(_doc(tmp_path, "0 HEAD\n0 @I1@ INDI\n1 NAME A /B/"))
     editor.add_record(["0 @GENEA1@ INDI"])

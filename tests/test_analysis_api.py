@@ -3,8 +3,12 @@ from typer.testing import CliRunner
 
 from genea.analysis import api, store
 from genea.cli.main import app
+from fixtures.analysis_tree import DOCS, TREE
+
 from genea.index.embed import FakeEmbedder
-from genea.tools.base import ToolError
+from genea.index.indexer import index_kb
+from genea.kb import init_kb
+from genea.tools.base import ToolError, open_tools
 
 runner = CliRunner()
 
@@ -81,3 +85,37 @@ def test_cli_analyze_list_and_show(analysis_kb, monkeypatch):
     assert result.exit_code == 0 and "error" in result.output
     result = runner.invoke(app, ["--kb", root, "analyze", "clan", "tree.ged#@I5@"])
     assert result.exit_code == 1 and "person, family or branch" in result.output
+
+
+def test_two_trees_with_one_file_name_get_separate_analyses(tmp_path):
+    root = tmp_path / "two"
+    for folder in ("a", "b"):
+        (root / folder).mkdir(parents=True)
+        (root / folder / "tree.ged").write_text(TREE, encoding="utf-8")
+    for rel, text in DOCS.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    kb = init_kb(root)
+    index_kb(kb, FakeEmbedder())
+    ctx = open_tools(kb, FakeEmbedder())
+    try:
+        a = api.analyze(ctx, "person", "a/tree.ged#@I3@").name
+        api.propose(ctx, a, "add_note", {"person_id": "a/tree.ged#@I3@", "text": "x"}, ["[docs/zapis.txt]"], "why")
+        b = api.analyze(ctx, "person", "b/tree.ged#@I3@").name
+        assert a == "tree-person-I3" and b != a and b.startswith("tree-person-I3-")
+        assert store.load(kb, a).ged_file == "a/tree.ged" and len(store.load(kb, a).proposals) == 1
+        assert store.load(kb, b).ged_file == "b/tree.ged" and store.load(kb, b).proposals == []
+        assert api.analyze(ctx, "person", "a/tree.ged#@I3@").name == a  # reruns find their own analysis
+        assert api.analyze(ctx, "person", "b/tree.ged#@I3@").name == b
+    finally:
+        ctx.conn.close()
+
+
+def test_analysis_of_another_tree_is_never_taken_over(actx, analysis_kb, monkeypatch):
+    name = api.analyze(actx, "person", "tree.ged#@I3@").name
+    saved = store.load(analysis_kb, name)
+    saved.ged_file = "other/tree.ged"
+    store.save(analysis_kb, saved)
+    monkeypatch.setattr(store, "scope_name", lambda ged_file, spec, unique=False: name)
+    with pytest.raises(ToolError, match="other/tree.ged"):
+        api.analyze(actx, "person", "tree.ged#@I3@")

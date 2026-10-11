@@ -8,6 +8,7 @@ from typing import Any
 
 from genea.analysis import store
 from genea.analysis.detectors import detect
+from genea.analysis.gedwrite import CONC_LIMIT
 from genea.analysis.iteration import build
 from genea.analysis.models import (PAGE_SIZE, SEVERITIES, Analysis, AnalysisList, AnalysisNote, AnalysisPage,
                                    AnalysisSummary, AnalysisUpdate, BuildResult, FindingView, Proposal, parse_cite)
@@ -32,6 +33,20 @@ def tree_index_state(ctx: ToolContext, ged_file: str, digest: str) -> str:
     return "ready" if row is not None and row["sha256"] == digest else "outdated"
 
 
+def current_state(ctx: ToolContext, analysis: Analysis) -> str:
+    """The analysis' index state now: 'outdated' once the tree changed after it, or it was made on an old index."""
+    try:
+        digest = tree_hash(ctx, analysis.ged_file)
+    except (OSError, ValueError):
+        return "outdated"
+    if digest != analysis.base_hash:
+        return "outdated"
+    state = tree_index_state(ctx, analysis.ged_file, digest)
+    if state != "ready":
+        return state
+    return "ready" if analysis.index_state == "ready" else "outdated"
+
+
 def write_report(ctx: ToolContext, analysis: Analysis) -> None:
     store.write_atomic(store.analysis_dir(ctx.kb, analysis.name) / "report.md", render_report(analysis))
 
@@ -40,6 +55,12 @@ def analyze(ctx: ToolContext, kind: str, target_id: str, direction: str = "both"
     spec, scope = resolve_scope(ctx, kind, target_id, direction, depth)
     name = store.scope_name(scope.ged_file, spec)
     old = store.load(ctx.kb, name) if store.exists(ctx.kb, name) else None
+    if old is not None and old.ged_file != scope.ged_file:  # another tree with the same file name
+        name = store.scope_name(scope.ged_file, spec, unique=True)
+        old = store.load(ctx.kb, name) if store.exists(ctx.kb, name) else None
+    if old is not None and old.ged_file != scope.ged_file:
+        raise ToolError(f"The analysis {name!r} belongs to {old.ged_file}, not {scope.ged_file}; its proposals "
+                        "cannot be moved to another tree. Rename or remove its folder under .genea/analyses.")
     digest = tree_hash(ctx, scope.ged_file)
     stamp = store.now()
     analysis = Analysis(
@@ -81,12 +102,13 @@ def _page(ctx: ToolContext, analysis: Analysis, page: int, severity: str | None)
                  if p.finding_id in shown or (page == 1 and p.finding_id not in known)]
     sources = list({s.cite(): s for f in chunk for s in f.sources}.values())
     folder = store.analysis_dir(ctx.kb, analysis.name)
+    state = current_state(ctx, analysis)
     return AnalysisPage(
-        name=analysis.name, scope=analysis.scope, ged_file=analysis.ged_file, index_state=analysis.index_state,
+        name=analysis.name, scope=analysis.scope, ged_file=analysis.ged_file, index_state=state,
         counts=analysis.counts(), page=page, pages=pages,
         findings=[FindingView(**f.model_dump(), status=analysis.finding_status(f.id)) for f in chunk],
         proposals=proposals, report=ctx.kb.rel(folder / "report.md"),
-        message=STATE_WARNINGS.get(analysis.index_state), sources=sources,
+        message=STATE_WARNINGS.get(state), sources=sources,
     )
 
 
@@ -108,27 +130,44 @@ def _require_fresh(ctx: ToolContext, analysis: Analysis) -> None:
     if digest != analysis.base_hash:
         raise ToolError(f"The tree changed after this analysis was made. Run analyze again for "
                         f"{analysis.scope.kind} {analysis.scope.id} first.")
+    if analysis.index_state != "ready":
+        raise ToolError(f"This analysis was made while the index was {analysis.index_state}. Run analyze again for "
+                        f"{analysis.scope.kind} {analysis.scope.id} first.")
+
+
+MULTILINE = {("add_note", "text"), ("add_source_citation", "source")}  # payload values that may hold line breaks
 
 
 def _check_ids(ctx: ToolContext, analysis: Analysis, operation: str, payload: dict[str, Any]) -> None:
-    """Normalize ids to 'file#@X@' and check they exist in the analysed tree."""
+    """Check the values are single lines of text, normalize ids to 'file#@X@' and check they exist in the tree."""
+    for key, value in payload.items():
+        if key == "line" or value is None:  # line is checked by _anchor
+            continue
+        if not isinstance(value, str):
+            raise ToolError(f"{key} must be text, not {type(value).__name__}.")
+        if (operation, key) in MULTILINE:  # written as CONT/CONC lines
+            continue
+        if "\n" in value or "\r" in value:
+            raise ToolError(f"{key} must be one line of text.")
+        if len(value) > CONC_LIMIT:
+            raise ToolError(f"{key} is longer than {CONC_LIMIT} characters.")
     ged = analysis.ged_file
     for key in ("person_id", "child_id"):
         value = payload.get(key)
         if not value:
             continue
-        if key == "child_id" and str(value).startswith("proposal:"):
-            ref = str(value).split(":", 1)[1]
+        if key == "child_id" and value.startswith("proposal:"):
+            ref = value.split(":", 1)[1]
             if not any(p.id == ref and p.operation == "add_person" and p.status == "active"
                        for p in analysis.proposals):
                 raise ToolError(f"{value} is not an active add_person proposal of this analysis.")
             continue
-        file, xref = parse_person_id(ctx, str(value))
+        file, xref = parse_person_id(ctx, value)
         if file != ged:
             raise ToolError(f"{value} is not in {ged}, the tree of this analysis.")
         payload[key] = person_id(file, xref)
     if payload.get("family_id"):
-        file, xref = parse_family_id(ctx, str(payload["family_id"]))
+        file, xref = parse_family_id(ctx, payload["family_id"])
         if file != ged:
             raise ToolError(f"{payload['family_id']} is not in {ged}, the tree of this analysis.")
         payload["family_id"] = person_id(file, xref)
@@ -145,15 +184,17 @@ def _anchor(ctx: ToolContext, payload: dict[str, Any]) -> dict[str, str | None]:
         line = int(payload["line"])
     except (TypeError, ValueError):
         raise ToolError("line must be the GEDCOM line number of the event (get_person lists it).") from None
-    row = ctx.conn.execute("SELECT type, date_raw, place FROM events WHERE ged_file = ? AND owner_xref = ? "
-                           "AND line_no = ?", (ged, xref, line)).fetchone()
+    row = ctx.conn.execute("SELECT type, description, date_raw, place FROM events "
+                           "WHERE ged_file = ? AND owner_xref = ? AND line_no = ?", (ged, xref, line)).fetchone()
     if row is None:
         raise ToolError(f"Line {line} is not an event of {payload['person_id']}; get_person lists its events "
                         "with their lines.")
     if not payload.get("date") and not payload.get("place"):
         raise ToolError("update_event needs a new date or place.")
     payload["line"] = line
-    return {"type": row["type"], "date": row["date_raw"], "place": row["place"]}
+    # empty values are None, as the builder reads them from the tree
+    return {"type": row["type"], "description": row["description"] or None, "date": row["date_raw"] or None,
+            "place": row["place"] or None}
 
 
 def propose(ctx: ToolContext, name: str, operation: str, payload: dict[str, Any], sources: list[str],
@@ -178,12 +219,12 @@ def propose(ctx: ToolContext, name: str, operation: str, payload: dict[str, Any]
     _check_ids(ctx, analysis, operation, payload)
     anchor = _anchor(ctx, payload) if operation == "update_event" else None
     for p in analysis.proposals:
-        if p.status == "active" and p.operation == operation and p.payload == payload:
+        if p.status in ("active", "stale") and p.operation == operation and p.payload == payload:
             return AnalysisUpdate(name=name, proposal_id=p.id, status=p.status, sources=p.sources,
                                   message=f"An identical proposal already exists ({p.id}); not recorded again.")
     proposal = Proposal(id=f"p-{len(analysis.proposals) + 1}", finding_id=finding_id, author=author,
-                        operation=operation, payload=payload, anchor=anchor, sources=refs,
-                        rationale=rationale.strip(), created=store.now())
+                        operation=operation, payload=payload, anchor=anchor, base_hash=analysis.base_hash,
+                        sources=refs, rationale=rationale.strip(), created=store.now())
     analysis.proposals.append(proposal)
     _save(ctx, analysis)
     return AnalysisUpdate(name=name, proposal_id=proposal.id, status=proposal.status, sources=refs,

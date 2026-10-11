@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from genea.analysis import store
@@ -78,3 +80,26 @@ def test_parse_cite(text, ref):
 def test_parse_cite_rejects(text):
     with pytest.raises(ToolError, match="Not a citation"):
         parse_cite(text)
+
+
+def test_unknown_operation_in_a_hand_edited_analysis_is_refused(tmp_path):
+    kb = init_kb(tmp_path)
+    store.save(kb, _analysis())
+    path = kb.analyses_dir / "tree-person-I1" / "analysis.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["proposals"] = [{"id": "p-1", "author": "user", "operation": "record", "payload": {}, "sources": [],
+                          "rationale": "x", "created": "2026-10-11T10:00:00"}]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ToolError, match="damaged"):
+        store.load(kb, "tree-person-I1")
+
+
+def test_old_proposals_without_base_hash_still_load(tmp_path):
+    kb = init_kb(tmp_path)
+    store.save(kb, _analysis())
+    path = kb.analyses_dir / "tree-person-I1" / "analysis.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["proposals"] = [{"id": "p-1", "author": "user", "operation": "add_note", "payload": {}, "sources": [],
+                          "rationale": "x", "created": "2026-10-11T10:00:00"}]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert store.load(kb, "tree-person-I1").proposals[0].base_hash is None

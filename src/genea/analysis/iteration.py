@@ -32,17 +32,23 @@ def _value(line: GedLine, tag: str) -> str | None:
     return child.value if child is not None and child.value else None
 
 
+def _description(line: GedLine) -> str | None:
+    """The event's value as the index stores it (events.description, see the GEDCOM mapper)."""
+    type_line = line.first("TYPE")
+    return (line.text() if line.value else (type_line.value if type_line else None)) or None
+
+
 def _plain(text: str) -> str:
     return text.replace("→", "->")  # describe_operation uses arrows; CP1250 has none
 
 
 class _Builder:
-    def __init__(self, editor: GedEditor, ged_file: str, version: int, day: str) -> None:
+    def __init__(self, editor: GedEditor, ged_file: str, version: int, day: str, tree_hash: str) -> None:
         self.editor, self.ged_file, self.version, self.day = editor, ged_file, version, day
+        self.tree_hash = tree_hash  # sha256 of the real tree being built from
         self.lines = editor.doc.lines
         self.new_ids: dict[str, str] = {}  # add_person proposal id -> @GENEA<n>@
-        self.famc: dict[str, list[str]] = {}  # new person xref -> family xrefs
-        self.updated: dict[int, str] = {}  # event line index -> id of the proposal that changed it
+        self.updated: dict[tuple[int, str], str] = {}  # (event line index, DATE/PLAC) -> proposal that changed it
 
     def record(self, ref: str) -> int:
         try:
@@ -70,17 +76,20 @@ class _Builder:
             lines.append(f"2 PLAC {p.payload['place']}")
         self.editor.insert_after(self.editor.subtree_end(rec), lines + text_lines(2, "NOTE", self.marker(p)))
 
-    def _find_event(self, rec: int, line_no: int, anchor: dict) -> int:
-        end = self.editor.subtree_end(rec)
+    def _find_event(self, rec: int, p: Proposal, anchor: dict) -> int:
+        """The event the proposal was made for. Its recorded line is trusted only if the event is unique in the
+        record, or the tree is exactly the one the proposal was made against; otherwise the proposal is stale."""
+        end, guess = self.editor.subtree_end(rec), int(p.payload["line"]) - 1
 
         def fits(i: int) -> bool:
             line = self.lines[i]
             return (line.level == 1 and line.tag == anchor.get("type") and _value(line, "DATE") == anchor.get("date")
-                    and _value(line, "PLAC") == anchor.get("place"))
+                    and _value(line, "PLAC") == anchor.get("place")
+                    and ("description" not in anchor or _description(line) == anchor["description"]))
 
-        if rec < line_no - 1 <= end and fits(line_no - 1):
-            return line_no - 1
         matches = [i for i in range(rec + 1, end + 1) if fits(i)]
+        if guess in matches and (len(matches) == 1 or p.base_hash == self.tree_hash):
+            return guess
         if len(matches) == 1:
             return matches[0]
         what = f"the {anchor.get('type')} event ({anchor.get('date') or 'no date'})"
@@ -89,15 +98,15 @@ class _Builder:
     def update_event(self, p: Proposal) -> None:
         rec = self.record(p.payload["person_id"])
         anchor = p.anchor or {}
-        event = self._find_event(rec, int(p.payload["line"]), anchor)
-        if event in self.updated:  # two proposals on one event: the first one recorded wins
-            raise Stale(f"the {anchor.get('type')} event is already changed by {self.updated[event]} "
-                        "in this iteration; withdraw one of them")
+        event = self._find_event(rec, p, anchor)
+        fields = [(field, tag) for field, tag in (("date", "DATE"), ("place", "PLAC")) if p.payload.get(field)]
+        for field, tag in fields:  # two proposals for one value: the first one recorded wins
+            if (event, tag) in self.updated:
+                raise Stale(f"the {field} of the {anchor.get('type')} event is already changed by "
+                            f"{self.updated[(event, tag)]} in this iteration; withdraw one of them")
         line = self.lines[event]
-        for field, tag in (("date", "DATE"), ("place", "PLAC")):
-            value = p.payload.get(field)
-            if not value:
-                continue
+        for field, tag in fields:
+            value = p.payload[field]
             child = line.first(tag)
             text = f"{line.level + 1} {tag} {value}"
             if child is None:
@@ -107,7 +116,8 @@ class _Builder:
         base = (f"{anchor.get('date') or '-'}, {anchor.get('place') or '-'} "
                 f"[{self.ged_file}:L{p.payload['line']}, base file]")
         self.editor.insert_after(self.editor.subtree_end(event), text_lines(line.level + 1, "NOTE", self.marker(p, base)))
-        self.updated[event] = p.id
+        for _, tag in fields:
+            self.updated[(event, tag)] = p.id
 
     def add_note(self, p: Proposal) -> None:
         rec = self.record(p.payload["person_id"])
@@ -143,7 +153,9 @@ class _Builder:
         if any(c.tag == "CHIL" and c.value == child_xref for c in self.lines[fam].children):
             raise Stale(f"{child} is already a child of this family")
         self.editor.insert_after(self.editor.subtree_end(fam), [f"1 CHIL {child_xref}"] + text_lines(1, "NOTE", self.marker(p)))
-        if not new:  # a new person gets its FAMC line in add_person
+        if new:  # both sides under this proposal's snapshot, so a failure leaves neither CHIL nor FAMC
+            self.editor.append_to_new(child_xref, [f"1 FAMC {fam_xref}"])
+        else:
             self.editor.insert_after(self.editor.subtree_end(child_rec), [f"1 FAMC {fam_xref}"])
 
     def add_person(self, p: Proposal) -> None:
@@ -157,7 +169,6 @@ class _Builder:
                 lines.append(f"2 DATE {pl['birth_date']}")
             if pl.get("birth_place"):
                 lines.append(f"2 PLAC {pl['birth_place']}")
-        lines += [f"1 FAMC {fam}" for fam in self.famc.get(xref, [])]
         self.editor.add_record(lines + text_lines(1, "NOTE", self.marker(p)))
 
     def check(self, f: Finding) -> bool:
@@ -193,7 +204,8 @@ def build(kb: KnowledgeBase, analysis: Analysis) -> BuildResult:
     except GedWriteError as exc:
         raise ToolError(str(exc)) from exc
     version = analysis.iterations + 1
-    b = _Builder(editor, analysis.ged_file, version, date.today().isoformat())
+    digest = hashlib.sha256(base).hexdigest()
+    b = _Builder(editor, analysis.ged_file, version, date.today().isoformat(), digest)
     candidates = [p for p in analysis.proposals if p.status in ("active", "stale")]
 
     taken, n = editor.xrefs(), 0
@@ -203,12 +215,6 @@ def build(kb: KnowledgeBase, analysis: Analysis) -> BuildResult:
             while f"@GENEA{n}@" in taken:
                 n += 1
             b.new_ids[p.id] = f"@GENEA{n}@"
-    for p in candidates:  # FAMC lines of new people, written with their record
-        child = p.payload.get("child_id", "")
-        if p.operation == "link_child" and child.startswith("proposal:"):
-            new_xref, fam = b.new_ids.get(child.split(":", 1)[1]), _xref(p.payload["family_id"])
-            if new_xref and fam in taken:
-                b.famc.setdefault(new_xref, []).append(fam)
 
     applied, stale = [], []
     for p in sorted(candidates, key=lambda p: p.operation != "add_person"):  # new people first
@@ -238,7 +244,7 @@ def build(kb: KnowledgeBase, analysis: Analysis) -> BuildResult:
     store.write_atomic(md_out, render_report(analysis, version, editor.log))
     message = (f"Wrote v{version}: {len(applied)} proposal(s) applied, {len(stale)} stale, {checks} CHECK note(s). "
                "The real tree is unchanged.")
-    if hashlib.sha256(base).hexdigest() != analysis.base_hash:
+    if digest != analysis.base_hash:
         message += " The tree changed since the analysis; run analyze again to refresh the findings."
     return BuildResult(name=analysis.name, version=version, iteration=kb.rel(ged_out), diff=kb.rel(diff_out),
                        report=kb.rel(md_out), applied=applied, stale=stale, checks=checks, message=message)

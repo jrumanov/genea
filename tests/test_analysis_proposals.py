@@ -5,7 +5,8 @@ from typer.testing import CliRunner
 from genea.analysis import api, store
 from genea.cli.main import app
 from genea.index.embed import FakeEmbedder
-from genea.tools.base import ToolError
+from genea.index.indexer import index_kb
+from genea.tools.base import ToolError, open_tools
 
 CITE = ["[docs/zapis.txt]"]
 runner = CliRunner()
@@ -23,7 +24,8 @@ def test_update_event_records_an_anchor(actx, analysis_kb, name):
                          CITE, "the register says 2 January")
     assert result.proposal_id == "p-1" and result.status == "active"
     [p] = store.load(analysis_kb, name).proposals
-    assert p.anchor == {"type": "BIRT", "date": "1 JAN 1878", "place": "Brno"}
+    assert p.anchor == {"type": "BIRT", "description": None, "date": "1 JAN 1878", "place": "Brno"}
+    assert p.base_hash == store.load(analysis_kb, name).base_hash
     assert p.payload == {"person_id": "tree.ged#@I3@", "line": line, "date": "2 JAN 1878"}
     assert p.author == "user" and p.sources[0].file == "docs/zapis.txt"
     assert (analysis_kb.root / "tree.ged").read_bytes() == before
@@ -51,6 +53,65 @@ def test_identical_proposal_is_not_repeated(actx, name):
 def test_bad_proposals_are_refused(actx, name, operation, payload, sources, rationale, match):
     with pytest.raises(ToolError, match=match):
         api.propose(actx, name, operation, payload, sources, rationale)
+
+
+@pytest.mark.parametrize(("operation", "payload", "match"), [
+    ("add_event", {"person_id": "tree.ged#@I3@", "type": "BAPM", "date": "1878\n0 @X@ INDI"}, "one line"),
+    ("add_event", {"person_id": "tree.ged#@I3@", "type": "BAPM", "place": 12}, "must be text"),
+    ("add_event", {"person_id": "tree.ged#@I3@", "type": ["BAPM"]}, "must be text"),
+    ("add_event", {"person_id": "tree.ged#@I3@", "type": {"x": 1}}, "must be text"),
+    ("add_event", {"person_id": "tree.ged#@I3@", "type": "BAPM", "place": "x" * 300}, "characters"),
+    ("add_person", {"given": "Mária\r", "surname": "Weiss"}, "one line"),
+    ("add_person", {"given": "Mária", "surname": "Weiss", "birth_date": 1883}, "must be text"),
+    ("add_person", {"given": "Mária", "surname": "Weiss", "birth_place": "Brno\n1 SEX M"}, "one line"),
+    ("add_source_citation", {"person_id": "tree.ged#@I3@", "source": "Matrika", "page": "f. 1\n2 X"}, "one line"),
+    ("add_note", {"person_id": ["tree.ged#@I3@"], "text": "x"}, "must be text"),
+    ("update_event", {"person_id": "tree.ged#@I3@", "line": 40, "place": "Brno\nx"}, "one line"),
+])
+def test_bad_payload_values_are_refused(actx, name, operation, payload, match):
+    with pytest.raises(ToolError, match=match):
+        api.propose(actx, name, operation, payload, CITE, "why")
+
+
+def test_multiline_note_and_source_are_allowed(actx, analysis_kb, name):
+    api.propose(actx, name, "add_note", {"person_id": "tree.ged#@I3@", "text": "a\nb"}, CITE, "why")
+    api.propose(actx, name, "add_source_citation", {"person_id": "tree.ged#@I3@", "source": "Matrika\nBrno"},
+                CITE, "why")
+    assert len(store.load(analysis_kb, name).proposals) == 2
+
+
+def test_identical_stale_proposal_is_not_repeated(actx, analysis_kb, name):
+    payload = {"person_id": "tree.ged#@I3@", "text": "Mlynár"}
+    first = api.propose(actx, name, "add_note", payload, CITE, "x")
+    saved = store.load(analysis_kb, name)
+    saved.proposals[0].status = "stale"
+    store.save(analysis_kb, saved)
+    again = api.propose(actx, name, "add_note", payload, CITE, "x")
+    assert again.proposal_id == first.proposal_id and "already exists" in again.message
+
+
+def test_analysis_made_on_an_outdated_index_needs_a_new_analyze(actx, analysis_kb):
+    path = analysis_kb.root / "tree.ged"
+    path.write_text(path.read_text(encoding="utf-8").replace("0 TRLR", "0 @N9@ NOTE x\n0 TRLR"), encoding="utf-8")
+    name = api.analyze(actx, "person", "tree.ged#@I3@").name
+    assert api.read_analysis(actx, name).index_state == "outdated"
+    index_kb(analysis_kb, FakeEmbedder())
+    ctx = open_tools(analysis_kb, FakeEmbedder())
+    try:
+        assert api.read_analysis(ctx, name).index_state == "outdated"  # analysed before the reindex
+        with pytest.raises(ToolError, match="analyze again"):
+            api.propose(ctx, name, "add_note", {"person_id": "tree.ged#@I3@", "text": "x"}, CITE, "why")
+        assert api.read_analysis(ctx, api.analyze(ctx, "person", "tree.ged#@I3@").name).index_state == "ready"
+    finally:
+        ctx.conn.close()
+
+
+def test_read_analysis_reports_a_changed_tree(actx, analysis_kb, name):
+    assert api.read_analysis(actx, name).index_state == "ready"
+    path = analysis_kb.root / "tree.ged"
+    path.write_text(path.read_text(encoding="utf-8").replace("0 TRLR", "0 @N9@ NOTE x\n0 TRLR"), encoding="utf-8")
+    page = api.read_analysis(actx, name)
+    assert page.index_state == "outdated" and "genea index" in page.message
 
 
 def test_update_event_needs_a_new_value(actx, name):
