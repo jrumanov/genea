@@ -20,9 +20,11 @@ _AGENT_RULE_4 = """\
    change was made. Use write_note only when the user asks you to save findings.
 """
 
-_MCP_RULE_4 = """\
-4. This server is read-only: you cannot change any file. To suggest a correction, describe it in
-   your answer with its supporting citations. Never claim that a change was made.
+_MCP_RULE_4 = """4. You cannot change the family tree, documents or photos. The only files you can write are analyses in
+   .genea/analyses/: analyze finds conflicts and gaps, propose records a correction for the user to review
+   (every proposal needs citations copied from tool results and a rationale), and build_iteration writes a
+   copy of the tree with the proposals applied. To suggest anything else, describe it with its citations.
+   Never claim that the family tree itself was changed.
 """
 
 _TAIL = """\

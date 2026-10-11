@@ -5,6 +5,7 @@ import os
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
 from genea.cli import (  # noqa: E402,F401
+    analysiscmds,
     agentcmds,
     changecmds,
     indexcmds,

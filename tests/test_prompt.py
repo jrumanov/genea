@@ -14,10 +14,11 @@ def test_agent_prompt_keeps_write_rules():
     assert "write_note" in SYSTEM_PROMPT
 
 
-def test_mcp_instructions_mention_no_write_tools():
+def test_mcp_instructions_allow_only_analysis_writes():
     for word in ("propose_change", "write_note", "genea changes"):
         assert word not in MCP_INSTRUCTIONS
-    assert "read-only" in MCP_INSTRUCTIONS
+    assert ".genea/analyses/" in MCP_INSTRUCTIONS
+    assert "Never claim that the family tree itself was changed" in MCP_INSTRUCTIONS
 
 
 def test_summary_hits_are_navigation_not_evidence():

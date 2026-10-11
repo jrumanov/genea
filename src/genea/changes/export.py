@@ -13,8 +13,8 @@ def _xref(ref: str) -> str:
     return ref.split("#", 1)[-1]  # "tree.ged#@I9@" -> "@I9@"
 
 
-def _instruction(change: Change) -> str:
-    p, op = change.payload, change.operation
+def describe_operation(op: str, p: dict) -> str:
+    """One line describing a GEDCOM operation, for checklists, reports and GENEA notes."""
     if op == "add_event":
         return f"Add {p['type']} to {p['person_id']}: date {p.get('date') or '—'}, place {p.get('place') or '—'}"
     if op == "update_event":
@@ -30,6 +30,10 @@ def _instruction(change: Change) -> str:
         return f"Add {p['child_id']} as a child of family {p['family_id']}"
     details = ", ".join(f"{k} {p[k]}" for k in ("sex", "birth_date", "birth_place") if p.get(k))
     return f"Add a new person {p['given']} {p['surname']}" + (f" ({details})" if details else "")
+
+
+def _instruction(change: Change) -> str:
+    return describe_operation(change.operation, change.payload)
 
 
 def _text_lines(level: int, tag: str, text: str) -> list[str]:

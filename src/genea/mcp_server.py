@@ -1,15 +1,16 @@
-"""Read-only MCP server: Claude calls the same query tools the built-in agent uses."""
+"""MCP server: the query tools the built-in agent uses, plus analysis tools that write only under .genea/analyses/."""
 
 from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError as McpToolError
 
 from genea.agent.prompt import MCP_INSTRUCTIONS
+from genea.analysis import api as analysis
 from genea.index.db import SchemaMismatch
 from genea.index.progress import index_state, read_progress
 from genea.index.status import IndexSummary, index_summary
@@ -77,7 +78,7 @@ def status_text(summary: IndexSummary) -> str:
 
 
 def build_server(source: ToolContext | IndexGate) -> MCPServer:
-    """Register the read-only tools. The wrappers are `async def` on purpose: the SDK runs plain
+    """Register the tools. The wrappers are `async def` on purpose: the SDK runs plain
     functions in worker threads, and the SQLite connection in the context belongs to the event-loop thread."""
     gate = source if isinstance(source, IndexGate) else IndexGate.ready(source)
     startup = index_summary(gate.kb).headline()
@@ -136,6 +137,50 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
         """Check the tree for impossible or suspicious data (events after death, parents too young or
         too old, documents that disagree). Without person_id it checks everyone."""
         return run(conflicts.find_conflicts, person_id)
+
+    @server.tool(structured_output=False)
+    async def analyze(scope: Literal["person", "family", "branch"], target_id: str,
+                      direction: Literal["ancestors", "descendants", "both"] = "both", depth: int = 4) -> str:
+        """Check a person, a family (id like 'tree.ged#@F3@') or a branch (ancestors/descendants of a person,
+        depth 1-6) for conflicts and gaps. Writes a report under .genea/analyses/ and returns the analysis name,
+        counts and the first findings; read_analysis pages through the rest. The tree is not changed."""
+        return run(analysis.analyze, scope, target_id, direction, depth)
+
+    @server.tool(structured_output=False)
+    async def read_analysis(name: str, severity: Literal["error", "needs_review", "info"] | None = None,
+                            page: int = 1) -> str:
+        """One page of an analysis' findings and their proposals, optionally only one severity."""
+        return run(analysis.read_analysis, name, severity, page)
+
+    @server.tool(structured_output=False)
+    async def propose(name: str,
+                      operation: Literal["add_event", "update_event", "add_note", "add_source_citation",
+                                         "link_child", "add_person"],
+                      payload: dict[str, Any], sources: list[str], rationale: str,
+                      finding_id: str | None = None) -> str:
+        """Record a proposed correction in an analysis, for the user to review; the tree is not changed.
+        payload: add_event {person_id, type, date?, place?}; update_event {person_id, line, date?, place?}
+        (line from get_person); add_note {person_id, text}; add_source_citation {person_id, source, page?,
+        event_type?}; link_child {family_id, child_id} (child_id may be 'proposal:<id>' of an add_person
+        proposal); add_person {given, surname, sex?, birth_date?, birth_place?}. sources are citations copied
+        from tool results, like '[docs/matrika.pdf p.3]'."""
+        return run(analysis.propose, name, operation, payload, sources, rationale, finding_id, "claude")
+
+    @server.tool(structured_output=False)
+    async def withdraw(name: str, proposal_id: str) -> str:
+        """Withdraw one of the proposals of an analysis."""
+        return run(analysis.withdraw, name, proposal_id)
+
+    @server.tool(structured_output=False)
+    async def add_analysis_note(name: str, text: str) -> str:
+        """Add a research note to an analysis report (kept apart from the evidence)."""
+        return run(analysis.add_note, name, text)
+
+    @server.tool(structured_output=False)
+    async def build_iteration(name: str) -> str:
+        """Write the next iteration of the tree under .genea/analyses/<name>/: a copy with every active proposal
+        applied and marked by a GENEA note, plus a diff and a report. The real tree is not changed."""
+        return run(analysis.build_iteration, name)
 
     @server.tool(structured_output=False)
     async def index_status() -> str:

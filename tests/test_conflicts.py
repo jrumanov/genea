@@ -1,4 +1,5 @@
 import pytest
+from fixtures.analysis_tree import TREE, make_analysis_kb
 
 from genea.index.embed import FakeEmbedder
 from genea.index.indexer import index_kb
@@ -77,3 +78,20 @@ def test_document_mismatch_needs_review(tools):
 
 def test_limit(tools):
     assert len(find_conflicts(tools, limit=1).conflicts) == 1
+
+
+def test_birth_after_mother_death_and_close_siblings(actx):
+    found = {(c.kind, c.person_id, c.severity) for c in find_conflicts(actx).conflicts}
+    assert ("born_after_mother_death", "tree.ged#@I5@", "error") in found
+    assert ("siblings_too_close", "tree.ged#@I4@", "needs_review") in found
+    assert not any(k == "siblings_too_close" and p == "tree.ged#@I3@" for k, p, _ in found)
+
+
+def test_twins_and_baptisms_do_not_fire(tmp_path):
+    tree = (TREE.replace("2 DATE 1 JUN 1878", "2 DATE 3 JAN 1878")
+            .replace("1 BIRT\n2 DATE 2 FEB 1881", "1 BAPM\n2 DATE 2 FEB 1881"))
+    kb = make_analysis_kb(tmp_path / "t", tree)
+    ctx = open_tools(kb, FakeEmbedder())
+    kinds = {c.kind for c in find_conflicts(ctx).conflicts}
+    ctx.conn.close()
+    assert "siblings_too_close" not in kinds and "born_after_mother_death" not in kinds

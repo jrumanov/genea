@@ -60,3 +60,13 @@ def test_split_name():
     assert split_name("Jan") == ("Jan", "")
     assert split_name("/Novák/") == ("", "Novák")
     assert split_name("") == ("", "")
+
+
+def test_genea_notes_are_not_person_notes(tmp_path):
+    path = tmp_path / "t.ged"
+    path.write_text("0 HEAD\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME A /B/\n1 NOTE Mlynár\n"
+                    "1 NOTE GENEA v1 2026-10-11 p-1 (claude): Add a note\n"
+                    "1 NOTE GENEA CHECK v2 2026-10-11 f-1: x\n1 NOTE GENEALOGY club member\n0 TRLR\n",
+                    encoding="utf-8")
+    [person] = map_gedcom(parse_gedcom(path)).persons
+    assert person.notes == "Mlynár\nGENEALOGY club member"

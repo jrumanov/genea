@@ -13,6 +13,7 @@ INDIVIDUAL_EVENT_TAGS = frozenset({
     "IMMI", "NATU", "CENS", "PROB", "WILL", "GRAD", "RETI", "EVEN", "CONF", "FCOM", "ORDN", "RELI",
 })
 FAMILY_EVENT_TAGS = frozenset({"MARR", "DIV", "ENGA", "MARB", "MARC", "MARL", "ANUL", "EVEN", "CENS", "RESI"})
+GENEA_NOTE = re.compile(r"^GENEA (CHECK )?v\d+ ")  # notes genea writes into iterations; never evidence
 
 
 @dataclass
@@ -125,7 +126,8 @@ def map_gedcom(doc: GedDocument) -> GedcomData:
             ]
             data.persons.append(PersonRec(
                 xref=record.xref, given=given, surname=surname, sex=_value(record.first("SEX")),
-                name_variants=variants, notes="\n".join(t for t in note_texts if t),
+                name_variants=variants,
+                notes="\n".join(t for t in note_texts if t and not GENEA_NOTE.match(t)),
                 line_no=record.line_no,
             ))
             for child in record.children:
