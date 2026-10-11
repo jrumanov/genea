@@ -15,6 +15,9 @@ transcripts_app = typer.Typer(no_args_is_help=True,
 app.add_typer(transcripts_app, name="transcripts")
 transcribe_model_app = typer.Typer(no_args_is_help=True, help="Prepare Whisper models for `genea transcribe`.")
 app.add_typer(transcribe_model_app, name="transcribe-model")
+analysis_app = typer.Typer(no_args_is_help=True,
+                           help="Review analyses: findings, proposals and iterations of the tree.")
+app.add_typer(analysis_app, name="analysis")
 
 
 @app.callback()
