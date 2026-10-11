@@ -92,3 +92,25 @@ def test_cp1250_text_that_cannot_be_encoded(tmp_path):
     with pytest.raises(GedWriteError, match="cannot be written"):
         editor.insert_after(3, ["1 NOTE Имя"])
     assert editor.serialize().decode("cp1250").endswith("1 NAME Ján /Kováč/\n1 NOTE Poznámka\n0 TRLR\n")
+
+
+def test_restore_twice_from_the_same_snapshot(tmp_path):
+    editor = GedEditor(_doc(tmp_path, SMALL))
+    editor.owner = "p-1"
+    editor.insert_after(1, ["1 NOTE a"])
+    snap = editor.snapshot()
+    expected = editor.serialize()
+    for n in range(2):
+        editor.restore(snap)
+        editor.insert_after(1, [f"1 NOTE extra{n}"])
+        editor.replace(5, "2 DATE 1901")
+        editor.add_record([f"0 @GENEA{n}@ INDI"])
+        editor.restore(snap)
+        assert editor.serialize() == expected
+        assert editor.log == {"p-1": [" 1 CHAR UTF-8", "+1 NOTE a"]}
+
+
+def test_crlf_no_trlr_and_no_final_newline(tmp_path):
+    editor = GedEditor(_doc(tmp_path, "0 HEAD\r\n0 @I1@ INDI\r\n1 NAME A /B/"))
+    editor.add_record(["0 @GENEA1@ INDI"])
+    assert editor.serialize() == b"0 HEAD\r\n0 @I1@ INDI\r\n1 NAME A /B/\r\n0 @GENEA1@ INDI\r\n"

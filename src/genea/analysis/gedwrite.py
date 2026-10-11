@@ -100,7 +100,9 @@ class GedEditor:
 
     def restore(self, snap) -> None:
         after, replace, new, log = snap
-        self._after, self._replace, self._new, self.log = defaultdict(list, after), replace, new, log
+        self._after = defaultdict(list, {k: list(v) for k, v in after.items()})
+        self._replace, self._new = dict(replace), list(new)
+        self.log = {k: list(v) for k, v in log.items()}
 
     def serialize(self) -> bytes:
         out = bytearray(self.doc.bom)
