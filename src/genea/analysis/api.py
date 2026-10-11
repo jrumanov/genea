@@ -8,8 +8,9 @@ from typing import Any
 
 from genea.analysis import store
 from genea.analysis.detectors import detect
+from genea.analysis.iteration import build
 from genea.analysis.models import (PAGE_SIZE, SEVERITIES, Analysis, AnalysisList, AnalysisNote, AnalysisPage,
-                                   AnalysisSummary, AnalysisUpdate, FindingView, Proposal, parse_cite)
+                                   AnalysisSummary, AnalysisUpdate, BuildResult, FindingView, Proposal, parse_cite)
 from genea.analysis.report import STATE_WARNINGS, render_report
 from genea.analysis.scope import resolve_scope
 from genea.changes.store import ChangeError, validate_change
@@ -224,3 +225,10 @@ def add_note(ctx: ToolContext, name: str, text: str) -> AnalysisUpdate:
     analysis.notes.append(AnalysisNote(created=store.now(), text=text))
     _save(ctx, analysis)
     return AnalysisUpdate(name=name, message="Note added to the report.")
+
+
+def build_iteration(ctx: ToolContext, name: str) -> BuildResult:
+    analysis = store.load(ctx.kb, name)
+    result = build(ctx.kb, analysis)
+    _save(ctx, analysis)
+    return result

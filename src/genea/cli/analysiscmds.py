@@ -115,3 +115,14 @@ def dismiss(ctx: typer.Context, name: str, finding_id: str,
             reason: str = typer.Option("", help="Why the finding is not a problem")) -> None:
     """Mark a finding as not a problem; it gets no CHECK note and stays dismissed on re-runs."""
     common.console.print(escape(_with_tools(ctx, api.dismiss, name, finding_id, reason).message))
+
+
+@analysis_app.command()
+def build(ctx: typer.Context, name: str) -> None:
+    """Write the next iteration: a copy of the tree with all active proposals applied, plus a diff and report."""
+    result = _with_tools(ctx, api.build_iteration, name)
+    common.console.print(escape(result.message))
+    for label, path in (("tree", result.iteration), ("diff", result.diff), ("report", result.report)):
+        common.console.print(f"{label}: {escape(path)}")
+    for proposal_id in result.stale:
+        common.console.print(f"[yellow]{proposal_id} not applied; see the report.[/yellow]")
