@@ -105,7 +105,8 @@ def test_stdio_server_end_to_end(sample_root, tmp_path):
     assert "Index state when this session started: The index is complete." in init.instructions
     assert {t.name for t in listed.tools} == {
         "find_person", "get_person", "relatives", "timeline", "search_documents",
-        "read_document", "find_images", "find_conflicts", "index_status"}
+        "read_document", "find_images", "find_conflicts", "index_status",
+        "analyze", "read_analysis", "propose", "withdraw", "add_analysis_note", "build_iteration"}
     assert found.is_error is False and "Jan Novák" in found.content[0].text  # diacritics survive stdio
     assert bad_id.is_error is True and "find_person" in bad_id.content[0].text
     assert bad_args.is_error is True            # invalid arguments are an error, not a crash...
