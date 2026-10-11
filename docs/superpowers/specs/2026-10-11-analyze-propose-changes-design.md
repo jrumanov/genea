@@ -44,8 +44,9 @@ semantics of `tools/conflicts.py`: a rule fires only if it is violated for every
 
 - **Conflicts** (severity `error`): the existing `find_conflicts` rules (event after death, baptism before
   birth, parent too young / mother too old, married too young), refactored so `find_conflicts` and the
-  detectors share one implementation. New: siblings born more than 1 week and less than 9 months apart (the
-  week excludes twins); child born after the mother's death.
+  detectors share one implementation. New: child born after the mother's death (`error`); siblings born more
+  than 1 week and less than 9 months (270 days) apart (`needs_review`, since a premature birth is possible;
+  the week excludes twins). Both compare `BIRT` events only: a baptism after the mother's death is normal.
 - **Gaps** (severity `info`): no birth/baptism event; no death/burial for someone born more than 110 years
   ago; no parent family; no sex; an event with an empty `source_citations`.
 - **Document evidence** (severity `needs_review`): linked passages (`links`, confidence ≥ 1.0) whose years
@@ -53,8 +54,9 @@ semantics of `tools/conflicts.py`: a rule fires only if it is violated for every
   with no dated events at all. The finding cites the passage; it never proposes a value.
 
 A `Finding` has `id`, `kind`, `severity`, `person_ids`, `family_id`, `message`, `sources` (`SourceRef`s).
-`id` is a short hash of kind + person/family + the event it concerns (type and base line), never of
-message or evidence, so it stays stable when evidence changes.
+`id` is a short hash of kind + person/family + a key naming what it concerns (the events by type and raw
+date, or the passage by file and chunk), never of message, evidence or line numbers, so it stays stable
+when evidence changes and when a new Gramps export shifts the lines.
 
 ## 4. Proposals (`analysis/store.py`)
 
