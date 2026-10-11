@@ -95,7 +95,9 @@ variable works too.
 | `genea ask "..."` / `chat` | Talk to the agent (`--show-tools` shows its tool calls) |
 | `genea person <name or id>` | Look a person up without the LLM |
 | `genea conflicts [id]` | Rule-based consistency checks without the LLM |
-| `genea mcp` | Serve the knowledge base to Claude as a read-only MCP server (see "Use with Claude") |
+| `genea analyze person\|family\|branch <id> [--direction D] [--depth N]` | Check part of the tree for conflicts and gaps; writes a report to `.genea/analyses/` |
+| `genea analysis list / show / propose / withdraw / dismiss / build` | Review findings, record proposals and build a corrected copy of the tree |
+| `genea mcp` | Serve the knowledge base to Claude over MCP (read-only, except analyses; see "Use with Claude") |
 | `genea transcribe <audio> [--model M] [--language L] [--start S] [--out F]` | Transcribe a recording with whisper.cpp into a Whisper-format `.txt`, with live progress |
 | `genea transcribe-model convert <hf-repo\|folder\|sk-small\|sk-medium\|sk-large-v3-turbo> [--name N] [--force]` | Convert a Hugging Face Whisper checkpoint to a whisper.cpp model, e.g. the Slovak fine-tunes |
 | `genea transcripts check [path]` | List transcripts where Whisper looped or stopped early (exit code 1 if any) |
@@ -113,6 +115,27 @@ changes to `.genea/changes/pending/`. Review them with `genea changes show <id>`
 - **Family tree**: `genea changes export` writes a checklist and a GEDCOM fragment to
   `.genea/exports/`. Make the edits in your genealogy program, then mark each change with
   `genea changes apply <id> --manual`. Writing `.ged` files directly is planned for a later version.
+
+## Analyses: proposing corrections to the tree
+
+`genea analyze` (or the MCP tool `analyze`) checks a person, a family or a branch for conflicts (events after
+death, a birth after the mother's death, siblings born too close together…) and gaps (no birth, no death for
+someone born over 110 years ago, no parents, events without a source). Detectors only find problems; they
+never guess a value.
+
+Corrections are **proposals** with citations and a reason, recorded by Claude (`propose`) or by you
+(`genea analysis propose`). `genea analysis build <name>` (MCP `build_iteration`) then writes
+`.genea/analyses/<name>/vN.ged`: a full copy of the real tree with every active proposal applied, each marked
+by a `NOTE` starting `GENEA vN`. Problems nobody has decided on get a `GENEA CHECK` note. Next to it are
+`vN.diff` and `vN.md` (the report with each change's diff).
+
+- The real `.ged` is never changed. Each iteration is rebuilt from it, so v2 does not contain v1's notes.
+- If the tree changed since a proposal was made (a new Gramps export), the proposal is re-found by its event;
+  if that is not possible it is marked stale and left out, never applied to the wrong line.
+- `genea analysis dismiss <name> <finding>` marks a finding as not a problem (only you can do this).
+- Only UTF-8 and ANSI (CP1250) trees can be written; export from Gramps as UTF-8.
+- An iteration cannot be imported into Gramps (Gramps would duplicate everyone). Review the diff and enter the
+  changes in Gramps; `GENEA` notes are never indexed as evidence.
 
 ## Configuration (`~/.genea/config.toml` or `<kb>/.genea/config.toml`)
 
