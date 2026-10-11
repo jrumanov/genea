@@ -12,8 +12,8 @@ from datetime import date
 
 from genea.tools.base import ToolContext, parse_person_id, person_id
 from genea.tools.models import Conflict, ConflictResult, SourceRef
-from genea.tools.people import (BIRTH_TYPES, event_rows, families_as_child, families_as_spouse,
-                                first_event, summary)
+from genea.tools.people import (BIRTH_TYPES, children_in, event_rows,
+                                families_as_child, families_as_spouse, first_event, summary)
 
 YEAR_RE = re.compile(r"\b(1[5-9]\d{2}|20\d{2})\b")
 ALLOWED_AFTER_DEATH = {"DEAT", "BURI", "CREM", "PROB"}
@@ -35,7 +35,7 @@ def find_conflicts(ctx: ToolContext, pid: str | None = None, limit: int = 100) -
                   ctx.conn.execute("SELECT ged_file, xref FROM persons ORDER BY id")]
     found: list[Conflict] = []
     for ged, xref in people:
-        found += _check_person(ctx.conn, ged, xref)
+        found += check_person(ctx.conn, ged, xref)
         if len(found) >= limit:
             break
     found = found[:max(1, limit)]
@@ -43,7 +43,8 @@ def find_conflicts(ctx: ToolContext, pid: str | None = None, limit: int = 100) -
     return ConflictResult(conflicts=found, sources=sources)
 
 
-def _check_person(conn: sqlite3.Connection, ged: str, xref: str) -> list[Conflict]:
+def check_person(conn: sqlite3.Connection, ged: str, xref: str) -> list[Conflict]:
+    """All rule checks for one person. Shared by find_conflicts and the analysis detectors."""
     pid = person_id(ged, xref)
     events = event_rows(conn, ged, xref)
     birth = first_event(events, ("BIRT",))
@@ -54,8 +55,8 @@ def _check_person(conn: sqlite3.Connection, ged: str, xref: str) -> list[Conflic
     def ref(*rows) -> list[SourceRef]:
         return [SourceRef(file=ged, line=r["line_no"]) for r in rows if r is not None]
 
-    def add(kind: str, message: str, sources: list[SourceRef]) -> None:
-        out.append(Conflict(kind=kind, severity="error", person_id=pid, message=message, sources=sources))
+    def add(kind: str, message: str, sources: list[SourceRef], severity: str = "error") -> None:
+        out.append(Conflict(kind=kind, severity=severity, person_id=pid, message=message, sources=sources))
 
     if death is not None and death["date_to"]:
         for e in events:
@@ -89,6 +90,28 @@ def _check_person(conn: sqlite3.Connection, ged: str, xref: str) -> list[Conflic
             for e in event_rows(conn, ged, family["xref"]):
                 if e["type"] == "MARR" and e["date_to"] and _years(born["date_from"], e["date_to"]) < 12:
                     add("married_too_young", f"Married ({e['date_raw']}) before the age of 12", ref(e, born))
+
+    if birth is not None and birth["date_from"]:  # BIRT only: a baptism after the mother's death is normal
+        for family in families_as_child(conn, ged, xref):
+            if family["wife_xref"]:
+                mother_death = first_event(event_rows(conn, ged, family["wife_xref"]), ("DEAT",))
+                if mother_death is not None and mother_death["date_to"] and birth["date_from"] > mother_death["date_to"]:
+                    add("born_after_mother_death",
+                        f"Born ({birth['date_raw']}) after the mother's death ({mother_death['date_raw']})",
+                        ref(birth, mother_death))
+            for sibling in children_in(conn, ged, family["xref"]):
+                if sibling == xref:
+                    continue
+                other = first_event(event_rows(conn, ged, sibling), ("BIRT",))
+                if other is None or not other["date_from"]:
+                    continue
+                least = (_d(birth["date_from"]) - _d(other["date_to"])).days
+                most = (_d(birth["date_to"]) - _d(other["date_from"])).days
+                if 7 < least and most < 270:  # more than a week (not twins), less than 9 months
+                    add("siblings_too_close",
+                        f"Born ({birth['date_raw']}) less than 9 months after the sibling "
+                        f"{summary(conn, ged, sibling).name} ({other['date_raw']})",
+                        ref(birth, other), severity="needs_review")
 
     out += _document_mismatches(conn, ged, xref, pid, events, born)
     return out
