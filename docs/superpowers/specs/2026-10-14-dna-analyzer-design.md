@@ -47,7 +47,8 @@ New package `src/genea/dna/`:
                                   /haplogroups.json   # results with markers, tool + tree versions
                                   /genotypes.sqlite   # rsid -> chrom, pos, genotype
 ~/.genea/dna-tools/                                    # global, shared by all KBs: Haplogrep jar,
-                                                       # later the ancestry reference panel
+                                                       # portable JRE (fallback), later the
+                                                       # ancestry reference panel
 ```
 
 The layout is per person from day one, so a relative's file can be added later (kinship and IBD
@@ -58,11 +59,27 @@ stays where the user keeps it; only `genotypes.sqlite` is copied into the KB.
 
 ## CLI (the only place computation happens)
 
-- `genea dna setup`: download the Haplogrep jar into `~/.genea/dna-tools/`; check Java and `yhaplo`.
+- `genea dna setup`: download the Haplogrep jar into `~/.genea/dna-tools/`; check Java and `yhaplo`;
+  download the portable JRE when no suitable system Java exists (see "Java runtime").
 - `genea dna import <csv> --person <gedcom-id> [--name <slug>] [--replace]`: parse, QC, store.
 - `genea dna analyze <person>`: run the haplogroup tools, write `haplogroups.json`.
 - `genea dna status`: people, QC summary, which analyses exist.
-- `genea doctor` reports missing Java, Haplogrep or `yhaplo`.
+- `genea doctor` reports missing Java, Haplogrep or `yhaplo`, and which Java is in use.
+
+### Java runtime
+
+Only the mtDNA step needs Java (Haplogrep); `yhaplo` is pure Python. A JRE is enough, no JDK.
+Resolution order, decided by `haplo.py` and reported by `doctor`:
+
+1. A system Java (on `PATH` or `JAVA_HOME`) whose version meets the minimum required by the chosen
+   Haplogrep version (the version check is part of "Verify before implementing").
+2. Otherwise a **portable JRE** (for example a Temurin JRE archive, about 50 MB) that
+   `genea dna setup` downloads and unpacks into `~/.genea/dna-tools/jre/`. It is shared by all
+   KBs, and genea invokes it by absolute path.
+
+The system Java, `PATH` and `JAVA_HOME` are never modified. The portable download is skipped when
+a suitable system Java exists, and a pinned download URL and checksum are verified before unpacking.
+If neither works, `analyze` skips mtDNA with a clear message and the Y step still runs.
 
 Optional dependencies go in a new `dna` extra (`snps`, `yhaplo`), like the existing `transcribe`
 and `convert` extras.
@@ -117,7 +134,9 @@ tree link; do not reconstruct the genotype from many small lookups.
 - Call rate below 95%: warning, not an error.
 - Person already imported: requires `--replace`.
 - A male label but no Y calls: Y is skipped and the reason recorded; no invented result.
-- Java too old, or Haplogrep or `yhaplo` missing: `analyze` stops with the exact fix.
+- Java too old and no portable JRE, or Haplogrep or `yhaplo` missing: `analyze` stops with the exact
+  fix (typically `genea dna setup`). A failed JRE download or checksum mismatch leaves no partial
+  unpack behind.
 - A failed tool never leaves a half-written `haplogroups.json` (atomic writes).
 - Before analysis: "not analyzed yet, run `genea dna analyze <person>`".
 
@@ -147,7 +166,8 @@ Deferred and opt-in: health and trait annotation (ClinVar / SNPedia). Sensitive;
 
 ## Verify before implementing
 
-- Which Haplogrep version runs on the installed Java 1.8, and whether a newer JRE is needed.
+- Which Haplogrep version runs on the installed Java 1.8, and so whether the portable JRE fallback
+  is needed on this machine; pick the JRE distribution, version, URL and checksum for it.
 - How many mtDNA and Y markers a MyHeritage chip actually covers; this decides the haplogroup
   resolution and what the caveat text must say.
 - Whether `yhaplo` accepts the MyHeritage format directly or needs conversion to its supported
