@@ -67,6 +67,8 @@ the user's go; corrections change the table, not the plan. Nothing is written be
    each prompt repeats "never overwrite an `.md`, always the `Review status: NOT REVIEWED` line, no git
    commands" and names the person from the tags). The register skill reads its target from the file
    name; if the name and the tagged person disagree, the worker reports it, it does not choose.
+4. When all workers have finished, run `genea --kb "D:\Foto DB" index --no-summaries` once more, so the
+   new `.md` files are searchable. Same busy/locked rule as in step 1.
 
 ## Before saying done
 
