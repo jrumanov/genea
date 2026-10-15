@@ -9,6 +9,28 @@ A census sheet (house sheet) lists everyone living in one house. The MD file cov
 tagged on the image, plus the house header and the census date. Everyone else on the sheet is out of scope.
 The writing is usually Slovak handwriting (older sheets can be Czech, Hungarian or German).
 
+## Several sheets at once: use parallel workers
+
+When asked for a folder or more than one sheet, do not read them one after another in the main session
+(each sheet costs several large images). List the sheets first: group front and back files into
+sheets, drop the ones that already have an `.md`, then start background workers (Agent tool,
+`run_in_background: true`), all in one message so they run in parallel. Give each worker one or two
+sheets, never the same sheet twice, and a prompt that:
+
+- tells it to invoke this skill and follow it for its sheets, with the folder and the exact front/back
+  file names (and the MD name when it differs, e.g. a `-a1` suffix or a name without `-scitaci_harok`);
+- repeats the rules that matter: never overwrite an `.md`, always the `Review status: NOT REVIEWED`
+  line, no git commands, only the new `.md` files are written;
+- tells it to crop the tagged rows, the header and the back signature block at full resolution
+  (Python PIL, `Image.MAX_IMAGE_PIXELS = None`, crops in the scratchpad), because the Read tool
+  downscales the large scans and the handwriting becomes unreliable;
+- asks for a short report per sheet: path written, tagged people found on front, back or not at all,
+  tag-to-row matches, doubtful or blacked-out values.
+
+A single sheet, or one or two quick ones, can be done inline. When the workers finish, give the user one
+combined report from their reports (do not claim anything a worker did not report) and name any sheet
+that failed or was skipped.
+
 ## 1. Check the tags
 
 ```
@@ -80,22 +102,38 @@ overwrite an existing `.md`: show the user the difference instead.
 
 Content, in this order:
 
-1. **Header**: `# Census <year>, <city/village>, <street> <house no.>`, then a line with the census
-   day from the back (as written) and the owner of the house.
+1. **Header**: `# Census <year>, <city/village>, <street> <house no.>`, then the review flag line
+   (see below), then a line with the census day from the back (as written) and the owner of the house.
 2. **Header block as written**: top-left and top-right text, line by line, original spelling.
 3. **One section per tagged person** (`## <name as written on the sheet>`): the row as written, then
    the fields as a list, one per line, heading from the form first and the value as written:
    `- Relation to head of household: ...`. Skip a field the sheet does not give.
-4. **Reading**: one or two sentences per person in the language the user writes to you in.
+4. **Reading**: one or two sentences per person, always in English (the sheet text and field values stay
+   in the original language; only the reading is English), whatever language the user writes to you in.
 
 Use bracketed italic notes `*[...]*` for non-text things (stamps, signatures, margin notes), the same
 as the other MD files in `rodinna historia/dokumenty_sorted`.
+
+**Review flag (mandatory).** Every file you write is a machine transcription and must carry this exact
+line directly under the `#` title (at the very top when a file has no title), with a blank line before
+and after:
+
+```
+Review status: NOT REVIEWED (machine transcription, check every value against the image)
+```
+
+A human then reads the file against the image, corrects it and replaces the line with
+`Review status: reviewed by <name>, <YYYY-MM-DD>`. Never write "reviewed" yourself and never change a
+flag a human has set; when asked to edit a file that already says "reviewed", keep the flag and tell the
+user which values you changed so they can re-check them. To find the files still waiting:
+`grep -rl "Review status: NOT REVIEWED" <folder>`.
 
 ## 6. Check before saying done
 
 - The file names only the tagged people, the owner of the house and, inside their rows, relation
   targets.
 - Every name, number and date matches the image; doubtful readings are marked, not smoothed over.
+- The `Review status: NOT REVIEWED` line is present under the title.
 - Tell the user: which tagged people were found on the front, back or not at all, what was blacked
   out or doubtful, and the path written. If the sheet held other people you skipped, say so in one
   line without listing them.

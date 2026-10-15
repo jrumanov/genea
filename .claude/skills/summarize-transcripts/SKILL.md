@@ -31,8 +31,9 @@ The knowledge base is passed as `--kb <folder or name>`. The user's is `D:\Foto 
    results in the summary cache and deletes their work files. A failed one is listed with the reason
    and kept: rerun step 2 for just that transcript, then import again.
 
-4. **Index.** `uv run genea --kb "<kb>" index` adds the summaries to the search index (it needs Ollama
-   only for embeddings). Tell the user how many were imported and anything that failed.
+4. **Do not index.** Never run `genea index` after importing, not even to make the summaries searchable:
+   the user runs the indexing manually. Tell the user how many were imported and anything that failed,
+   and that the index still needs to be rebuilt.
 
 The transcripts are private family recordings: this sends them to Anthropic. The user chose that
 (2026-10-09); do not use this workflow on another knowledge base without asking.
