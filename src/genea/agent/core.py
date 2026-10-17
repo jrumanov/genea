@@ -14,8 +14,10 @@ from pydantic_ai.messages import ModelMessage, ToolCallPart
 from pydantic_ai.usage import UsageLimits
 
 from genea.agent.prompt import SYSTEM_PROMPT
+from genea.dna import tools as dna_tools
+from genea.dna.limits import RsidBudget
 from genea.kb import KnowledgeBase
-from genea.tool_runner import run_tool
+from genea.tool_runner import run_kb_tool, run_tool
 from genea.tools import conflicts, curate, people, search
 from genea.tools.base import ToolContext
 from genea.tools.models import SourceRef
@@ -111,6 +113,32 @@ def build_agent(model) -> Agent[ToolContext, str]:
         Always give a rationale and the sources that support the change."""
         return _call(ctx, curate.propose_change, target_kind, target_path, operation, payload,
                      rationale, sources)
+
+    budget: RsidBudget | None = None  # one budget per agent, i.e. per `genea chat` session
+
+    def _dna(ctx: RunContext[ToolContext], fn, *args) -> str:
+        return run_kb_tool(ctx.deps.kb, fn, *args).text
+
+    @agent.tool
+    async def dna_summary(ctx: RunContext[ToolContext], person: str) -> str:
+        """What DNA data exists for a person (a DNA person name, or the tree id it was imported for, like
+        'tree.ged#@I12@'): inferred sex, SNP count, call rate, warnings and whether haplogroups were analysed."""
+        return _dna(ctx, dna_tools.dna_summary, person)
+
+    @agent.tool
+    async def haplogroups(ctx: RunContext[ToolContext], person: str) -> str:
+        """The Y (direct paternal line) and mtDNA (direct maternal line) haplogroups computed from a person's
+        raw DNA file, with the markers used and the tools that called them. Supporting evidence, never proof of a tree link."""
+        return _dna(ctx, dna_tools.haplogroups, person)
+
+    @agent.tool
+    async def snp_lookup(ctx: RunContext[ToolContext], person: str, rsids: list[str]) -> str:
+        """Genotypes of 1-20 SNPs by rsID (like rs4988235) from a person's raw DNA file. Limited on purpose:
+        at most 20 rsIDs per call and a fixed budget per session. Look up only what the user asks about."""
+        nonlocal budget
+        if budget is None:
+            budget = RsidBudget(ctx.deps.kb.settings.dna_session_rsids)
+        return _dna(ctx, dna_tools.snp_lookup, budget, person, rsids)
 
     return agent
 
