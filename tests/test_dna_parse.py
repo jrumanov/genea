@@ -72,6 +72,20 @@ def test_import_without_index_warns(tmp_path):
     assert any("not indexed" in w for w in result.warnings)
 
 
+def test_import_while_index_has_no_persons_table_warns(tmp_path):
+    kb = init_kb(tmp_path / "kb")
+    kb.index_path.parent.mkdir(parents=True, exist_ok=True)
+    sqlite3.connect(kb.index_path).close()
+    result = api.import_file(kb, write_csv(tmp_path / "m.csv"), "tree.ged#@I12@", slug="dad")
+    assert result.meta.tree_name is None and any("not indexed" in w for w in result.warnings)
+
+
+def test_import_while_index_is_incomplete_warns(analysis_kb, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "index_state", lambda kb: "building")
+    result = api.import_file(analysis_kb, write_csv(tmp_path / "m.csv"), "tree.ged#@I999@", slug="dad")
+    assert result.meta.tree_name is None and any("not indexed" in w for w in result.warnings)
+
+
 def test_reimport_needs_replace_before_parsing(analysis_kb, tmp_path, monkeypatch):
     csv = write_csv(tmp_path / "m.csv")
     api.import_file(analysis_kb, csv, "tree.ged#@I1@")

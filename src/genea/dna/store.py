@@ -18,8 +18,9 @@ from genea.tools.base import ToolError
 
 Row = tuple[str, str, int, str | None]  # rsid, chromosome, position, genotype (None: no call)
 
-_SLUG = re.compile(r"^[\w.-]+$")
-_CITE_FILE = re.compile(r"^dna/(?P<slug>[\w.-]+)/(?P<name>meta\.json|haplogroups\.json|genotypes\.sqlite)$")
+_SLUG = re.compile(r"[\w-][\w.-]*")
+_RESERVED = re.compile(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?")
+_CITE_FILE = re.compile(r"dna/(?P<slug>[\w-][\w.-]*)/(?P<name>meta\.json|haplogroups\.json|genotypes\.sqlite)")
 
 
 class DnaError(ToolError):
@@ -77,7 +78,7 @@ def normalize_gedcom_id(raw: str) -> str:
 
 
 def check_slug(slug: str) -> None:
-    if not _SLUG.match(slug or "") or slug in (".", ".."):
+    if (not _SLUG.fullmatch(slug or "") or slug.endswith((".", " ")) or _RESERVED.fullmatch(slug)):
         raise DnaError(f"Invalid DNA person name {slug!r}: use letters, digits, '.', '_' or '-'.")
 
 
@@ -209,7 +210,7 @@ def chrom_rows(kb: KnowledgeBase, slug: str, chroms: tuple[str, ...]) -> list[Ro
 
 def citation_exists(kb: KnowledgeBase, file: str) -> bool:
     """True for 'dna/<slug>/meta.json' (or haplogroups.json, genotypes.sqlite) when that file exists."""
-    match = _CITE_FILE.match(file or "")
+    match = _CITE_FILE.fullmatch(file or "")
     if not match or match["slug"] in (".", ".."):
         return False
     return (kb.dna_dir / match["slug"] / match["name"]).is_file()

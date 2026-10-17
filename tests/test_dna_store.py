@@ -21,6 +21,17 @@ def test_slug_and_gedcom_id():
             store.check_slug(bad)
 
 
+@pytest.mark.parametrize("bad", ["abc\n", ".dad", "dad.", "dad ", "CON", "nul.txt", "com1", "LPT9.x"])
+def test_check_slug_rejects_unsafe_names(bad):
+    with pytest.raises(DnaError):
+        store.check_slug(bad)
+
+
+@pytest.mark.parametrize("good", ["tree.ged-I12", "dad", "console", "a.b"])
+def test_check_slug_accepts_normal_names(good):
+    store.check_slug(good)
+
+
 def test_save_and_resolve_by_slug_or_gedcom_id(kb):
     add_person(kb)
     assert store.resolve_person(kb, "tree.ged-I12").gedcom_id == "tree.ged#@I12@"
@@ -73,6 +84,8 @@ def test_citation_exists(kb):
     assert not store.citation_exists(kb, "dna/tree.ged-I12/haplogroups.json")  # not analysed yet
     assert not store.citation_exists(kb, "dna/../config.toml")
     assert not store.citation_exists(kb, "dna/../meta.json")
+    assert not store.citation_exists(kb, "dna/tree.ged-I12\n/meta.json")
+    assert not store.citation_exists(kb, "dna/tree.ged-I12/meta.json\n")
 
 
 def test_two_kbs_do_not_share_people(tmp_path):

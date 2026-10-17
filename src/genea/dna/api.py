@@ -13,6 +13,7 @@ from genea.dna.parse import read_myheritage
 from genea.dna.qc import compute_qc
 from genea.dna.store import (DnaError, Haplogroups, PersonMeta, check_slug, chrom_rows, normalize_gedcom_id, now,
                              person_dir, resolve_person, save_haplogroups, save_person, slug_for)
+from genea.index.progress import index_state
 from genea.kb import KnowledgeBase
 
 
@@ -24,15 +25,18 @@ class ImportResult:
 
 def _tree_person(kb: KnowledgeBase, gedcom_id: str) -> tuple[str | None, str | None] | None:
     """(name, sex) of the person in the index; None when the knowledge base is not indexed."""
-    if not kb.index_path.exists():
+    if index_state(kb) != "ready":  # missing, being rebuilt or interrupted: persons may be absent or partial
         return None
     ged, xref = gedcom_id.split("#", 1)
-    conn = sqlite3.connect(f"{kb.index_path.as_uri()}?mode=ro", uri=True)
     try:
-        row = conn.execute("SELECT given, surname, sex FROM persons WHERE ged_file = ? AND xref = ?",
-                           (ged, xref)).fetchone()
-    finally:
-        conn.close()
+        conn = sqlite3.connect(f"{kb.index_path.as_uri()}?mode=ro", uri=True)
+        try:
+            row = conn.execute("SELECT given, surname, sex FROM persons WHERE ged_file = ? AND xref = ?",
+                               (ged, xref)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.OperationalError:  # no persons table yet
+        return None
     if row is None:
         raise DnaError(f"No person {gedcom_id} in the indexed tree; check the id with find_person.")
     return " ".join(p for p in row[:2] if p) or None, row[2]
@@ -51,7 +55,7 @@ def import_file(kb: KnowledgeBase, csv_path: Path, gedcom_id: str, slug: str | N
     warnings = list(qc.warnings)
     name = tree_sex = None
     if tree is None:
-        warnings.append("The knowledge base is not indexed, so the tree id was not checked; run `genea index` "
+        warnings.append("The knowledge base is not indexed (or the index is still being built), so the tree id was not checked; run `genea index` "
                         "and import again with --replace to link the name.")
     else:
         name, tree_sex = tree
