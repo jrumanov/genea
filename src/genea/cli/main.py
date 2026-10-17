@@ -8,6 +8,7 @@ from genea.cli import (  # noqa: E402,F401
     analysiscmds,
     agentcmds,
     changecmds,
+    dnacmds,
     indexcmds,
     kbcmds,
     mcpcmds,

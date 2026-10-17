@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sqlite3
 from dataclasses import dataclass
 
@@ -58,8 +59,28 @@ def _has_model(names: list[str], model: str) -> bool:
     return model in names or f"{model}:latest" in names
 
 
+def dna_checks() -> list[Check]:
+    """Shown only when the dna extra is installed, so doctor stays green for people who do not use DNA."""
+    if importlib.util.find_spec("snps") is None:
+        return []
+    from genea.dna import runtime
+
+    java = runtime.find_java()
+    checks = [Check("Java (DNA)", java.path is not None, java.detail,
+                    "" if java.path else "genea dna setup (downloads a portable Java into ~/.genea/dna-tools; "
+                                         "your system Java is not changed)")]
+    installed = runtime.haplogrep_exe().is_file() and runtime.rcrs_fasta().is_file()
+    checks.append(Check("Haplogrep", installed,
+                        f"{runtime.HAPLOGREP_VERSION} ({runtime.HAPLOGREP_TREE})" if installed else "not installed",
+                        "" if installed else "genea dna setup"))
+    version = runtime.yhaplo_version()
+    checks.append(Check("yhaplo", version is not None, version or "not installed",
+                        "" if version else "uv sync --extra dna"))
+    return checks
+
+
 def run_checks(settings: Settings) -> list[Check]:
-    checks = [check_sqlite_vec(), check_exiftool(settings.exiftool)]
+    checks = [check_sqlite_vec(), check_exiftool(settings.exiftool), *dna_checks()]
     names = ollama_models(settings.ollama_url)
     if names is None:
         checks.append(Check("Ollama", False, f"not reachable at {settings.ollama_url}",
