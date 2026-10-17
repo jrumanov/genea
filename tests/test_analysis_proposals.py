@@ -179,3 +179,20 @@ def test_cli_propose_withdraw_dismiss(analysis_kb, monkeypatch, actx, name):
     finding = store.load(analysis_kb, name).findings[0].id
     result = runner.invoke(app, ["--kb", root, "analysis", "dismiss", name, finding, "--reason", "known"])
     assert result.exit_code == 0 and store.load(analysis_kb, name).dismissed == {finding: "known"}
+
+
+def test_dna_results_can_be_cited(actx, analysis_kb, name):
+    from fixtures.dna import add_person
+
+    from genea.dna import store as dna_store
+    from genea.dna.store import HaploCall, Haplogroups
+
+    add_person(analysis_kb, slug="tree.ged-I1", gedcom_id="tree.ged#@I1@")
+    cite = "[dna/tree.ged-I1/haplogroups.json]"
+    with pytest.raises(ToolError, match="not an indexed file"):
+        api.propose(actx, name, "add_note", {"person_id": "tree.ged#@I1@", "text": "Y: R-P312"}, [cite], "yhaplo")
+    dna_store.save_haplogroups(analysis_kb, "tree.ged-I1",
+                               Haplogroups(analyzed_at="x", calls=[HaploCall(line="Y", haplogroup="R-P312")]))
+    result = api.propose(actx, name, "add_note", {"person_id": "tree.ged#@I1@", "text": "Y: R-P312"}, [cite],
+                         "yhaplo called R-P312")
+    assert result.status == "active"

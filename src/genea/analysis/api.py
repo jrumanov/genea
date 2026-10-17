@@ -15,6 +15,7 @@ from genea.analysis.models import (PAGE_SIZE, SEVERITIES, Analysis, AnalysisList
 from genea.analysis.report import STATE_WARNINGS, render_report
 from genea.analysis.scope import resolve_scope
 from genea.changes.store import ChangeError, validate_change
+from genea.dna.store import citation_exists
 from genea.index.progress import index_state
 from genea.ingest.gedcom.mapper import INDIVIDUAL_EVENT_TAGS
 from genea.tools.base import ToolContext, ToolError, parse_family_id, parse_person_id, person_id
@@ -209,7 +210,8 @@ def propose(ctx: ToolContext, name: str, operation: str, payload: dict[str, Any]
     if not refs:
         raise ToolError("Cite at least one source, like [docs/matrika.pdf p.3].")
     for ref in refs:
-        if ctx.conn.execute("SELECT 1 FROM files WHERE path = ?", (ref.file,)).fetchone() is None:
+        indexed = ctx.conn.execute("SELECT 1 FROM files WHERE path = ?", (ref.file,)).fetchone() is not None
+        if not indexed and not citation_exists(ctx.kb, ref.file):
             raise ToolError(f"{ref.file} is not an indexed file of this knowledge base; cite what the tools returned.")
     payload = dict(payload or {})
     try:
