@@ -99,6 +99,7 @@ variable works too.
 | `genea conflicts [id]` | Rule-based consistency checks without the LLM |
 | `genea analyze person\|family\|branch <id> [--direction D] [--depth N]` | Check part of the tree for conflicts and gaps; writes a report to `.genea/analyses/` |
 | `genea analysis list / show / propose / withdraw / dismiss / build` | Review findings, record proposals and build a corrected copy of the tree |
+| `genea dna setup / import / analyze / status` | Call mtDNA and Y haplogroups from a MyHeritage raw DNA file (see "DNA") |
 | `genea mcp` | Serve the knowledge base to Claude over MCP (read-only, except analyses; see "Use with Claude") |
 | `genea transcribe <audio> [--model M] [--language L] [--start S] [--out F]` | Transcribe a recording with whisper.cpp into a Whisper-format `.txt`, with live progress |
 | `genea transcribe-model convert <hf-repo\|folder\|sk-small\|sk-medium\|sk-large-v3-turbo> [--name N] [--force]` | Convert a Hugging Face Whisper checkpoint to a whisper.cpp model, e.g. the Slovak fine-tunes |
@@ -141,6 +142,24 @@ by a `NOTE` starting `GENEA vN`. Conflicts (`error` and `needs_review` findings)
 - Only UTF-8 and ANSI (CP1250) trees can be written; export from Gramps as UTF-8.
 - An iteration cannot be imported into Gramps (Gramps would duplicate everyone). Review the diff and enter the
   changes in Gramps; `GENEA` notes are never indexed as evidence.
+
+## DNA (MyHeritage raw data)
+
+genea can read a MyHeritage raw DNA download (`MyHeritage_raw_dna_data.csv`, build 37) for one person of the tree
+and call the mtDNA (maternal line) and Y (paternal line) haplogroups with free tools.
+
+    uv sync --extra dna
+    genea dna setup                                   # Haplogrep 3 (+ a portable Java 21 if yours is older than 11)
+    genea dna import MyHeritage_raw_dna_data.csv --person "tree.ged#@I12@"
+    genea dna analyze tree.ged-I12
+    genea dna status
+
+- Data stays in `<knowledge base>/.genea/dna/<person>/`; it is never indexed or searchable. The raw CSV is not copied.
+- The tools go to `~/.genea/dna-tools/` and are shared by all knowledge bases; your system Java is not changed.
+- The agent and the MCP server get read-only tools: `dna_summary`, `haplogroups` and `snp_lookup`. `snp_lookup`
+  answers at most 20 rsIDs per call and 200 per session (`dna_session_rsids` in `config.toml`). Over MCP, results
+  are sent to Claude.
+- Licenses: Haplogrep 3 is MIT; yhaplo (23andMe) is free for non-commercial use by individuals.
 
 ## Configuration (`~/.genea/config.toml` or `<kb>/.genea/config.toml`)
 
