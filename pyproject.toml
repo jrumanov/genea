@@ -19,17 +19,21 @@ dependencies = [
 cloud = ["pydantic-ai-slim[anthropic]>=2.54"]
 mcp = ["mcp>=2.3"]
 transcribe = ["pywhispercpp>=1.5", "av>=14", "numpy>=2"]
+dna = ["snps>=2.12", "yhaplo @ git+https://github.com/23andMe/yhaplo@f72f88f2818aebd049c29d2ca8fc2f30c3003b17"]
 convert = ["huggingface-hub>=0.30", "safetensors>=0.5", "numpy>=2"]
 
 [project.scripts]
 genea = "genea.cli.main:app"
 
 [dependency-groups]
-dev = ["mcp>=2.3", "pillow>=12.0", "pytest>=8.4", "safetensors>=0.5", "reportlab>=5.0", "av>=14", "numpy>=2"]
+dev = ["mcp>=2.3", "pillow>=12.0", "pytest>=8.4", "safetensors>=0.5", "reportlab>=5.0", "av>=14", "numpy>=2", "snps>=2.12"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/genea"]
