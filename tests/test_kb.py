@@ -39,3 +39,9 @@ def test_open(tmp_path):
     kb = KnowledgeBase.open(str(tmp_path))
     assert kb.root == tmp_path.resolve()
     assert kb.notes_dir.is_dir()
+
+
+def test_dna_dir_is_under_meta_dir_and_created_on_demand(tmp_path):
+    kb = init_kb(tmp_path)
+    assert kb.dna_dir == kb.meta_dir / "dna"
+    assert not kb.dna_dir.exists()

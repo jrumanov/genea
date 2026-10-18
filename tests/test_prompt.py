@@ -27,3 +27,11 @@ def test_summary_hits_are_navigation_not_evidence():
         assert "@14:20]" in prompt  # how a moment in a recording is cited
     assert "\n6. Search hits" in SYSTEM_PROMPT
     assert "\n7. Search hits" in MCP_INSTRUCTIONS
+
+
+def test_dna_rule_in_both():
+    for prompt in (SYSTEM_PROMPT, MCP_INSTRUCTIONS):
+        assert "direct paternal line" in prompt and "never as proof" in prompt
+        assert "[dna/tree.ged-I12/haplogroups.json]" in prompt and "reconstruct the genotype" in prompt
+    assert "\n7. dna_summary" in SYSTEM_PROMPT
+    assert "\n8. dna_summary" in MCP_INSTRUCTIONS

@@ -69,6 +69,11 @@ class KnowledgeBase:
         return self.meta_dir / "analyses"
 
     @property
+    def dna_dir(self) -> Path:
+        """Per-person DNA data (`genea dna`); created on the first import."""
+        return self.meta_dir / "dna"
+
+    @property
     def summary_work_dir(self) -> Path:
         """Transcript sections for an outside summarizer and its answers (`genea summaries`)."""
         return self.meta_dir / "summary-work"

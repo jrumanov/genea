@@ -25,6 +25,7 @@ class Settings:
     transcribe_model: str = "medium"  # whisper.cpp model name (downloaded on first use) or path to a ggml .bin
     transcribe_language: str = ""  # language code such as "sk"; empty or "auto": whisper.cpp detects it
     transcribe_structure_model: str = ""  # small model whose segment boundaries the double pass keeps; empty: off
+    dna_session_rsids: int = 200  # rsIDs one agent or MCP session may look up with snp_lookup (privacy budget)
 
 
 class KBNotFound(Exception):

@@ -44,11 +44,12 @@ def _call(server, tool, arguments):
 
 
 ANALYSIS = {"analyze", "read_analysis", "propose", "withdraw", "add_analysis_note", "build_iteration"}
+DNA = {"dna_summary", "haplogroups", "snp_lookup"}
 
 
 def test_registers_exactly_the_expected_tools(tools):
     names = {t.name for t in asyncio.run(build_server(tools).list_tools())}
-    assert names == READ_ONLY | MCP_ONLY | ANALYSIS
+    assert names == READ_ONLY | MCP_ONLY | ANALYSIS | DNA
     assert not names & {"write_note", "propose_change", "dismiss"}
 
 
@@ -62,7 +63,7 @@ def test_tool_payload_matches_direct_call(tools, name, arguments, fn, positional
 def test_descriptions_match_the_agent_tools(tools):
     agent_tools = build_agent(TestModel())._function_toolset.tools
     served = {t.name: t.description for t in asyncio.run(build_server(tools).list_tools())}
-    for name in READ_ONLY:
+    for name in READ_ONLY | DNA:
         assert " ".join(served[name].split()) == " ".join(agent_tools[name].description.split())
 
 
@@ -100,7 +101,7 @@ def _building(kb, done=2, total=6):
 
 def test_server_starts_without_an_index_and_explains(kb):
     server = build_server(_gate(kb))
-    assert {t.name for t in asyncio.run(server.list_tools())} == READ_ONLY | MCP_ONLY | ANALYSIS
+    assert {t.name for t in asyncio.run(server.list_tools())} == READ_ONLY | MCP_ONLY | ANALYSIS | DNA
     with pytest.raises(McpToolError, match="not indexed yet"):
         _call(server, "find_person", {"name": "Jan"})
     assert "not indexed yet" in _text(_call(server, "index_status", {}))

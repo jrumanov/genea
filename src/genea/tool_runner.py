@@ -7,6 +7,7 @@ from typing import Any, NamedTuple
 
 from pydantic import BaseModel
 
+from genea.kb import KnowledgeBase
 from genea.tools.base import ToolContext, ToolError
 
 TRUNCATION_MARKER = " …[truncated: narrow the query]"
@@ -63,20 +64,26 @@ def shrink(data: dict[str, Any], limit: int) -> str:
     return dump(data)
 
 
-def render(ctx: ToolContext, result: BaseModel) -> str:
+def render_limited(result: BaseModel, limit: int) -> str:
     text = result.model_dump_json(exclude_none=True)
-    limit = ctx.kb.settings.tool_output_chars
     if len(text) <= limit:
         return text
     return shrink(result.model_dump(mode="json", exclude_none=True), limit) + TRUNCATION_MARKER
 
 
-def error_text(ctx: ToolContext, message: str) -> str:
+def render(ctx: ToolContext, result: BaseModel) -> str:
+    return render_limited(result, ctx.kb.settings.tool_output_chars)
+
+
+def error_limited(message: str, limit: int) -> str:
     """A failure is a normal tool result, so repeated failures never exhaust a per-tool retry budget."""
-    limit = ctx.kb.settings.tool_output_chars
     if len(message) > limit:
         message = message[:limit] + "…"
     return dump({"error": message})
+
+
+def error_text(ctx: ToolContext, message: str) -> str:
+    return error_limited(message, ctx.kb.settings.tool_output_chars)
 
 
 def run_tool(ctx: ToolContext, fn, *args, **kwargs) -> ToolOutput:
@@ -86,3 +93,14 @@ def run_tool(ctx: ToolContext, fn, *args, **kwargs) -> ToolOutput:
         return ToolOutput(error_text(ctx, str(exc)), True)
     except Exception as exc:  # noqa: BLE001 - one bad file or index must not crash the agent loop or server
         return ToolOutput(error_text(ctx, f"{fn.__name__} failed: {type(exc).__name__}: {exc}"), True)
+
+
+def run_kb_tool(kb: KnowledgeBase, fn, *args, **kwargs) -> ToolOutput:
+    """run_tool for tools that need only the knowledge base, not the index (the DNA tools)."""
+    limit = kb.settings.tool_output_chars
+    try:
+        return ToolOutput(render_limited(fn(kb, *args, **kwargs), limit), False)
+    except ToolError as exc:
+        return ToolOutput(error_limited(str(exc), limit), True)
+    except Exception as exc:  # noqa: BLE001 - one bad file must not crash the agent loop or server
+        return ToolOutput(error_limited(f"{fn.__name__} failed: {type(exc).__name__}: {exc}", limit), True)

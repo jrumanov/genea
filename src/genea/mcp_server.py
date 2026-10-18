@@ -11,11 +11,13 @@ from mcp.server.mcpserver.exceptions import ToolError as McpToolError
 
 from genea.agent.prompt import MCP_INSTRUCTIONS
 from genea.analysis import api as analysis
+from genea.dna import tools as dna_tools
+from genea.dna.limits import RsidBudget
 from genea.index.db import SchemaMismatch
 from genea.index.progress import index_state, read_progress
 from genea.index.status import IndexSummary, index_summary
 from genea.kb import KnowledgeBase
-from genea.tool_runner import run_tool
+from genea.tool_runner import run_kb_tool, run_tool
 from genea.tools import conflicts, people, search
 from genea.tools.base import ToolContext
 
@@ -90,6 +92,15 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
             raise McpToolError(out.text)
         note = gate.note()
         return out.text if note is None else f"{out.text}\n\n{note}"
+
+    budget = RsidBudget(gate.kb.settings.dna_session_rsids)  # one budget for the whole MCP session
+
+    def run_dna(fn, *args) -> str:
+        """DNA tools need no index: they answer before and while `genea index` runs."""
+        out = run_kb_tool(gate.kb, fn, *args)
+        if out.is_error:
+            raise McpToolError(out.text)
+        return out.text
 
     @server.tool(structured_output=False)
     async def find_person(name: str, born_around: int | None = None, place: str | None = None) -> str:
@@ -181,6 +192,24 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
         """Write the next iteration of the tree under .genea/analyses/<name>/: a copy with every active proposal
         applied and marked by a GENEA note, plus a diff and a report. The real tree is not changed."""
         return run(analysis.build_iteration, name)
+
+    @server.tool(structured_output=False)
+    async def dna_summary(person: str) -> str:
+        """What DNA data exists for a person (a DNA person name, or the tree id it was imported for, like
+        'tree.ged#@I12@'): inferred sex, SNP count, call rate, warnings and whether haplogroups were analysed."""
+        return run_dna(dna_tools.dna_summary, person)
+
+    @server.tool(structured_output=False)
+    async def haplogroups(person: str) -> str:
+        """The Y (direct paternal line) and mtDNA (direct maternal line) haplogroups computed from a person's
+        raw DNA file, with the markers used and the tools that called them. Supporting evidence, never proof of a tree link."""
+        return run_dna(dna_tools.haplogroups, person)
+
+    @server.tool(structured_output=False)
+    async def snp_lookup(person: str, rsids: list[str]) -> str:
+        """Genotypes of 1-20 SNPs by rsID (like rs4988235) from a person's raw DNA file. Limited on purpose:
+        at most 20 rsIDs per call and a fixed budget per session. Look up only what the user asks about."""
+        return run_dna(dna_tools.snp_lookup, budget, person, rsids)
 
     @server.tool(structured_output=False)
     async def index_status() -> str:

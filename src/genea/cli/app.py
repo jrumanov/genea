@@ -18,6 +18,9 @@ app.add_typer(transcribe_model_app, name="transcribe-model")
 analysis_app = typer.Typer(no_args_is_help=True,
                            help="Review analyses: findings, proposals and iterations of the tree.")
 app.add_typer(analysis_app, name="analysis")
+dna_app = typer.Typer(no_args_is_help=True,
+                      help="Analyse a MyHeritage raw DNA file: mtDNA and Y haplogroups, SNP lookups for the agent.")
+app.add_typer(dna_app, name="dna")
 
 
 @app.callback()

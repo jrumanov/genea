@@ -42,5 +42,12 @@ _SUMMARY_RULE = """\
    like [recordings/x.txt @14:20]. Never cite a summary.
 """
 
-SYSTEM_PROMPT = _HEAD + _AGENT_RULE_4 + _TAIL + _SUMMARY_RULE.format(n=6)
-MCP_INSTRUCTIONS = _HEAD + _MCP_RULE_4 + _TAIL + _MCP_RULE_6 + _SUMMARY_RULE.format(n=7)
+_DNA_RULE = """{n}. dna_summary, haplogroups and snp_lookup read results computed from a family member's raw DNA file. A Y
+   haplogroup describes only the direct paternal line and an mtDNA haplogroup only the direct maternal line, never
+   the whole person, and chip data has limited resolution. Treat a haplogroup as supporting evidence, never as proof
+   of a specific link in the tree; cite it like [dna/tree.ged-I12/haplogroups.json]. snp_lookup is limited on
+   purpose: look up only what the user asks about and never try to reconstruct the genotype.
+"""
+
+SYSTEM_PROMPT = _HEAD + _AGENT_RULE_4 + _TAIL + _SUMMARY_RULE.format(n=6) + _DNA_RULE.format(n=7)
+MCP_INSTRUCTIONS = _HEAD + _MCP_RULE_4 + _TAIL + _MCP_RULE_6 + _SUMMARY_RULE.format(n=7) + _DNA_RULE.format(n=8)
