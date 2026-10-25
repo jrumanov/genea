@@ -8,8 +8,8 @@ from genea.text import normalize
 
 def _reference_links(conn):
     """The original quadratic algorithm: every person form is searched in every text."""
-    people = [(r["ged_file"], r["xref"], name_forms(r["given"], r["surname"], json.loads(r["name_variants"])))
-              for r in conn.execute("SELECT ged_file, xref, given, surname, name_variants FROM persons")]
+    people = [(r["ged_file"], r["xref"], name_forms(r["given"], r["surname"], json.loads(r["name_variants"]), r["sex"]))
+              for r in conn.execute("SELECT ged_file, xref, given, surname, name_variants, sex FROM persons")]
     sources = [("chunk", r["id"], normalize(r["text"])) for r in conn.execute("SELECT id, text FROM chunks")]
     sources += [("image", r["id"], r["search_norm"]) for r in conn.execute("SELECT id, search_norm FROM images")]
     rows = []
@@ -36,9 +36,10 @@ def test_rebuild_links_matches_the_exhaustive_search(tmp_path):
     for i in range(40):
         variants = [f"{rng.choice(givens)} {rng.choice(surnames)}"] if i % 3 == 0 else []
         conn.execute("INSERT INTO persons (file_id, ged_file, xref, given, surname, name_norm, names_norm, "
-                     "name_variants, line_no) VALUES (1, 'a.ged', ?, ?, ?, '', '', ?, 1)",
-                     (f"@I{i}@", rng.choice(givens), rng.choice(surnames), json.dumps(variants)))
-    words = ["Jan", "Josef", "Marie", "Anna", "Zofie", "Karel", "Novák", "Nowak", "Cerny", "Dvořák", "J.", "A.",
+                     "name_variants, line_no, sex) VALUES (1, 'a.ged', ?, ?, ?, '', '', ?, 1, ?)",
+                     (f"@I{i}@", rng.choice(givens), rng.choice(surnames), json.dumps(variants),
+                      rng.choice(["M", "F", None])))
+    words = ["Jan", "Josef", "Marie", "Anna", "Zofie", "Karel", "Novák", "Nowak", "Cerny", "Dvořák", "Annou", "Novákovou", "Novákovi", "Dvořákova", "Jana", "J.", "A.",
              "se", "narodil", "v", "Brně", "Johann", "Novak"]
     for i in range(30):
         conn.execute("INSERT INTO files (id, path, kind, sha256, mtime, indexed_at, status) "
@@ -54,3 +55,10 @@ def test_rebuild_links_matches_the_exhaustive_search(tmp_path):
     rebuild_links(conn)  # replaces, never appends
     assert _links(conn) == expected
     conn.close()
+
+
+def test_declined_mention_links_to_the_person(tools):    # kronika: "oženil s Annou Svobodovou"
+    rows = tools.conn.execute(
+        "SELECT l.confidence FROM links l JOIN chunks c ON l.source_kind = 'chunk' AND c.id = l.source_id "
+        "JOIN files f ON f.id = c.file_id WHERE f.path = 'docs/kronika.txt' AND l.person_xref = '@I2@'").fetchall()
+    assert [r[0] for r in rows] == [0.8]
