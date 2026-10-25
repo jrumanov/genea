@@ -9,6 +9,9 @@ _EXTRA = str.maketrans({"ł": "l", "Ł": "L", "ø": "o", "Ø": "O", "ß": "ss", 
                         "Đ": "D", "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE"})
 
 
+PREFIX_MIN = 4  # search words this long also match longer words (declined and feminine forms: Fabik -> Fabikovej)
+
+
 def normalize(text: str) -> str:
     """Lowercase, strip accents, turn punctuation into single spaces."""
     text = unicodedata.normalize("NFKD", text.translate(_EXTRA))
@@ -34,13 +37,15 @@ def _normalize_with_map(text: str) -> tuple[str, list[int]]:
 
 
 def snippet(text: str, needles: list[str], width: int) -> str:
-    """At most `width` characters of the original text around the earliest whole-word needle match."""
+    """At most `width` characters of the original text around the earliest needle match. A needle starts at a word
+    boundary; one of PREFIX_MIN+ characters may end inside a word (as a prefix), a shorter one must end the word."""
     norm, index = _normalize_with_map(text)
     best: tuple[int, int] | None = None
     for needle in needles:
         if not needle:
             continue
-        m = re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", norm)
+        tail = "" if len(needle) >= PREFIX_MIN else r"(?!\w)"
+        m = re.search(r"(?<!\w)" + re.escape(needle) + tail, norm)
         if m and (best is None or m.start() < best[0]):
             best = (m.start(), m.end())
     n = len(text)

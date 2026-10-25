@@ -32,3 +32,14 @@ def test_snippet_maps_back_through_length_changing_normalization():
     text = "Straße " * 40 + unicodedata.normalize("NFD", "Fabíková") + " tu. " + "Maße " * 40
     s = snippet(text, ["fabikova"], 40)
     assert unicodedata.normalize("NFD", "Fabíková") in s and len(s) <= 40
+
+
+def test_snippet_long_needles_match_as_prefixes():
+    from genea.text import snippet
+    s = snippet("Kronika obce. " * 40 + "Pozdravujem pani Fabikovej." + " Koniec." * 40, ["fabik"], 60)
+    assert "Fabikovej" in s
+
+
+def test_snippet_short_needles_stay_whole_words():
+    from genea.text import snippet
+    assert snippet("Janasik " * 50 + "pan Jan.", ["jan"], 20).endswith("pan Jan.")  # not the first Janasik

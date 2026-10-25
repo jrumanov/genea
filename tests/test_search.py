@@ -59,8 +59,12 @@ def test_default_search_fits_and_is_one_hit_per_file(tools):
 
 def test_search_largest_request_still_fits(tools):
     _long_docs(tools)
-    out = render(tools, search_documents(tools, "Jozef Fabik", k=20, per_file=5))
+    result = search_documents(tools, "Jozef Fabik", k=20, per_file=5)
+    out = render(tools, result)
     assert len(out) <= tools.kb.settings.tool_output_chars and '"truncated":true' not in out
+    assert len({h.file for h in result.hits}) == 16 and result.more_files == 0  # every candidate file kept
+    assert 16 < len(result.hits) <= 100 and result.more_chunks > 0  # trimmed extra chunks are counted
+    assert [h.source for h in result.hits] == result.sources
 
 
 def test_search_groups_chunks_by_file_and_counts_the_rest(tools):
@@ -78,9 +82,22 @@ def test_prefix_matches_declined_forms(tools):
     assert "docs/list.txt" in {h.file for h in result.hits}
 
 
+def test_search_snippet_shows_a_declined_form_deep_in_a_long_chunk(tools):
+    text = "Kronika obce. " * 200 + "Pozdravujem pani Fabikovej."  # one ~2,800-char chunk, match past 1,500
+    (tools.kb.root / "docs" / "list.txt").write_text(text, encoding="utf-8")
+    index_kb(tools.kb, FakeEmbedder())
+    result = search_documents(replace(tools, embedder=BrokenEmbedder()), "Fabik")
+    hit = next(h for h in result.hits if h.file == "docs/list.txt")
+    assert "Fabikovej" in hit.text
+
+
 @pytest.mark.parametrize("query", ['"Fabik', 'Fabik" OR', "NEAR(a b) * - ^ :", "Fabik's (1890)", "AND"])
 def test_search_survives_fts_syntax_in_query(tools, query):
-    search_documents(replace(tools, embedder=BrokenEmbedder()), query)
+    (tools.kb.root / "docs" / "list.txt").write_text("Pozdravujem pani Fabikovej.", encoding="utf-8")
+    index_kb(tools.kb, FakeEmbedder())
+    result = search_documents(replace(tools, embedder=BrokenEmbedder()), query)
+    if "Fabik" in query:
+        assert "docs/list.txt" in {h.file for h in result.hits}
 
 
 def test_read_document(tools):

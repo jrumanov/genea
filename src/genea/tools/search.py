@@ -10,13 +10,12 @@ import sqlite_vec
 from genea.index.embed import EmbeddingError
 from genea.ingest.docs import DOC_EXTS, extract_document
 from genea.ingest.transcript import Segment, format_time
-from genea.text import normalize, snippet
+from genea.text import PREFIX_MIN, normalize, snippet
 from genea.tools.base import ToolContext, ToolError, parse_person_id
 from genea.tools.models import DocHit, DocumentText, ImageOut, ImageResult, SearchResult, SourceRef
 
 RRF_K = 60
 CANDIDATES = 100
-PREFIX_MIN = 4  # tokens this long also match longer words (declined and feminine forms: Fabik -> Fabikovej)
 
 
 def _fts_query(text: str) -> str | None:
@@ -27,8 +26,9 @@ def _fts_query(text: str) -> str | None:
 
 
 def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1) -> SearchResult:
-    """Hybrid search: FTS5 (BM25) + vector KNN, merged with reciprocal rank fusion. `k` files, each with its
-    best `per_file` chunks; passages are cut around the match so the whole result fits tool_output_chars."""
+    """Hybrid search: FTS5 (BM25) + vector KNN, merged with reciprocal rank fusion. Up to `k` files, each with up to
+    its best `per_file` chunks as space allows: passages are cut around the match and, if needed, extra chunks and
+    then the worst files are dropped so the whole result fits tool_output_chars (more_files/more_chunks count them)."""
     if not query.strip():
         raise ToolError("Give a search query.")
     k = max(1, min(k, 20))
@@ -55,11 +55,12 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
     file_of = _chunk_files(ctx, [chunk_id for chunk_id, _ in ranked])
     groups: dict[int, list[tuple[int, float]]] = {}  # file id -> its chunks, best first; files in rank order
     for chunk_id, score in ranked:
-        groups.setdefault(file_of[chunk_id], []).append((chunk_id, score))
+        if chunk_id in file_of:  # a vector row without a chunk row is skipped, not a KeyError
+            groups.setdefault(file_of[chunk_id], []).append((chunk_id, score))
     chosen = [chunks[:per_file] for chunks in list(groups.values())[:k]]
     picked = [hit for chunks in chosen for hit in chunks]
     width = min(1500, max(200, (ctx.kb.settings.tool_output_chars - RESULT_OVERHEAD) // max(len(picked), 1) - 400))
-    needles = normalize(query).split()
+    needles = re.findall(r"\w+", normalize(query))  # the same words the FTS query is built from
     hits = []
     for chunk_id, score in picked:
         row = ctx.conn.execute(
@@ -82,7 +83,7 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
     result.hits = hits
     result.sources = [h.source for h in hits]
     result.more_files = len(groups) - len(returned)
-    result.more_chunks = len(ranked) - len(hits)
+    result.more_chunks = sum(len(chunks) for chunks in groups.values()) - len(hits)
     return result
 
 
