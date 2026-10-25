@@ -15,6 +15,7 @@ from pathlib import Path
 
 import sqlite_vec
 
+from genea.declension import given_cases, surname_cases
 from genea.exiftool import ExifToolError
 from genea.index.db import open_index, set_index_state
 from genea.index import summary_cache
@@ -228,20 +229,69 @@ def _index_one(conn, kb, embedder, path, kind, digest, old_id, report: IndexRepo
             report.problems.append((rel, message))
 
 
-def name_forms(given: str | None, surname: str | None, variants: list[str]) -> list[tuple[str, float]]:
+EXACT, VARIANT, WEAK = 1.0, 0.8, 0.6
+
+
+def _word_cases(phrase: str, sex: str | None, cases_of) -> dict[str, set[str]]:
+    """Case -> forms of a (possibly multi-word) name: every word is declined in the same case."""
+    out: dict[str, set[str]] = {}
+    for word in phrase.split():
+        for case, forms in cases_of(word, sex).items():
+            out[case] = {f"{p} {f}".strip() for p in out.get(case, {""}) for f in forms}
+    return out
+
+
+def _switch_gender(surname: str, from_sex: str) -> str | None:
+    """A surname written for `from_sex`, in the other sex's form, or None when it has no distinct one."""
+    head, _, last = surname.rpartition(" ")
+    if from_sex == "F":
+        if last.endswith("ova") and len(last) > 3:
+            new = last[:-3]
+        elif last.endswith(("ska", "cka")):
+            new = last[:-1] + "y"
+        else:
+            return None
+    elif last.endswith(("y", "i")):
+        new = last[:-1] + "a"
+    elif last and last[-1] not in "aeiouy":
+        new = last + "ova"
+    else:
+        return None
+    return f"{head} {new}".strip()
+
+
+def name_forms(given: str | None, surname: str | None, variants: list[str],
+               sex: str | None = None) -> list[tuple[str, float]]:
     """Normalized name spellings to look for in text, with a confidence for each."""
     forms: dict[str, float] = {}
     g, s = normalize(given or ""), normalize(surname or "")
     if g and s:
         first = g.split()[0]
         for form in (f"{g} {s}", f"{s} {g}", f"{first} {s}", f"{s} {first}"):
-            forms[form] = 1.0
-        forms.setdefault(f"{first[0]} {s}", 0.6)
+            forms[form] = EXACT
+        forms.setdefault(f"{first[0]} {s}", WEAK)
     for variant in variants:
         norm = normalize(variant)
         if len(norm.split()) >= 2:
-            forms[norm] = 1.0
-    return list(forms.items())
+            forms[norm] = EXACT
+    if g and s:
+        # (surname, sex whose rules decline it): as written, and in the masculine and feminine form
+        surnames = [(s, sex)]
+        for target in ("M", "F"):
+            if (switched := _switch_gender(s, "F" if target == "M" else "M")) and switched != s:
+                surnames.append((switched, target))
+        for given_part in {g, g.split()[0]}:
+            given_cases_ = _word_cases(given_part, sex, given_cases)
+            for surname_part, surname_sex in surnames:
+                surname_cases_ = _word_cases(surname_part, surname_sex, surname_cases)
+                for case, gforms in given_cases_.items():
+                    for gf in gforms:
+                        for sf in surname_cases_.get(case, ()):
+                            if surname_sex == "F" and case != "nom" and sf == surname_part:
+                                continue  # a feminine surname that does not decline is not written in a case
+                            forms.setdefault(f"{gf} {sf}", VARIANT)
+                            forms.setdefault(f"{sf} {gf}", VARIANT)
+    return [(f, c) for f, c in forms.items() if len(f.split()) >= 2]
 
 
 def rebuild_links(conn: sqlite3.Connection) -> None:
@@ -251,8 +301,8 @@ def rebuild_links(conn: sqlite3.Connection) -> None:
     # is in a text exactly when its words are consecutive words of the text: look the text's word
     # sequences up here instead of searching every form of every person in every text.
     by_form: dict[str, list[tuple[int, str, str, float]]] = {}
-    for number, r in enumerate(conn.execute("SELECT ged_file, xref, given, surname, name_variants FROM persons")):
-        for form, conf in name_forms(r["given"], r["surname"], json.loads(r["name_variants"])):
+    for number, r in enumerate(conn.execute("SELECT ged_file, xref, given, surname, name_variants, sex FROM persons")):
+        for form, conf in name_forms(r["given"], r["surname"], json.loads(r["name_variants"]), r["sex"]):
             by_form.setdefault(form, []).append((number, r["ged_file"], r["xref"], conf))
     form_lengths = sorted({len(form.split()) for form in by_form})
     sources = [("chunk", r["id"], normalize(r["text"])) 

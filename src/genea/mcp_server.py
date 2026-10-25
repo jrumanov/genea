@@ -18,7 +18,7 @@ from genea.index.progress import index_state, read_progress
 from genea.index.status import IndexSummary, index_summary
 from genea.kb import KnowledgeBase
 from genea.tool_runner import run_kb_tool, run_tool
-from genea.tools import conflicts, people, search
+from genea.tools import conflicts, mentions, people, search
 from genea.tools.base import ToolContext
 
 
@@ -127,9 +127,14 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
         return run(people.timeline, person_id)
 
     @server.tool(structured_output=False)
-    async def search_documents(query: str, k: int = 8) -> str:
-        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page (or, for recordings, the time in the recording)."""
-        return run(search.search_documents, query, k)
+    async def documents_about(person_id: str, page: int = 1) -> str:
+        """Every text document that mentions a person (an id from find_person), grouped by file with passages to cite, best matches first. Use it when asked for everything about someone; it says how many files there are and whether more pages exist (page=2, ...). Files marked ambiguous may be about a namesake."""
+        return run(mentions.documents_about, person_id, page)
+
+    @server.tool(structured_output=False)
+    async def search_documents(query: str, k: int = 8, per_file: int = 1) -> str:
+        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page (or, for recordings, the time in the recording). Returns one passage per file unless per_file is higher; more_files and more_chunks count candidate files and passages not returned (a lower bound, not all of them are matches)."""
+        return run(search.search_documents, query, k, per_file)
 
     @server.tool(structured_output=False)
     async def read_document(path: str, page: int | None = None, start_s: float | None = None) -> str:

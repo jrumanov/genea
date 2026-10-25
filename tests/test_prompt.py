@@ -9,6 +9,17 @@ def test_shared_rules_are_in_both():
         assert needle in MCP_INSTRUCTIONS
 
 
+def test_documents_about_is_in_both():
+    assert "documents_about" in SYSTEM_PROMPT
+    assert "documents_about" in MCP_INSTRUCTIONS
+
+
+def test_documents_about_rule_fits_the_tool_call_limit():
+    for prompt in (SYSTEM_PROMPT, MCP_INSTRUCTIONS):
+        assert "page through all of it" not in prompt  # some people have 33 pages; the agent stops at 15 tool calls
+        assert "how many files and pages remain" in prompt
+
+
 def test_agent_prompt_keeps_write_rules():
     assert "propose_change" in SYSTEM_PROMPT
     assert "write_note" in SYSTEM_PROMPT

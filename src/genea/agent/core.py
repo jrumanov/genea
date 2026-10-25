@@ -18,7 +18,7 @@ from genea.dna import tools as dna_tools
 from genea.dna.limits import RsidBudget
 from genea.kb import KnowledgeBase
 from genea.tool_runner import run_kb_tool, run_tool
-from genea.tools import conflicts, curate, people, search
+from genea.tools import conflicts, curate, mentions, people, search
 from genea.tools.base import ToolContext
 from genea.tools.models import SourceRef
 
@@ -67,9 +67,14 @@ def build_agent(model) -> Agent[ToolContext, str]:
         return _call(ctx, people.timeline, person_id)
 
     @agent.tool
-    async def search_documents(ctx: RunContext[ToolContext], query: str, k: int = 8) -> str:
-        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page (or, for recordings, the time in the recording)."""
-        return _call(ctx, search.search_documents, query, k)
+    async def documents_about(ctx: RunContext[ToolContext], person_id: str, page: int = 1) -> str:
+        """Every text document that mentions a person (an id from find_person), grouped by file with passages to cite, best matches first. Use it when asked for everything about someone; it says how many files there are and whether more pages exist (page=2, ...). Files marked ambiguous may be about a namesake."""
+        return _call(ctx, mentions.documents_about, person_id, page)
+
+    @agent.tool
+    async def search_documents(ctx: RunContext[ToolContext], query: str, k: int = 8, per_file: int = 1) -> str:
+        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page (or, for recordings, the time in the recording). Returns one passage per file unless per_file is higher; more_files and more_chunks count candidate files and passages not returned (a lower bound, not all of them are matches)."""
+        return _call(ctx, search.search_documents, query, k, per_file)
 
     @agent.tool
     async def read_document(ctx: RunContext[ToolContext], path: str, page: int | None = None,

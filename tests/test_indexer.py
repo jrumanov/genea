@@ -409,3 +409,26 @@ def test_damaged_pdf_is_indexed_and_named_in_problems(kb):
     assert messages["docs/matrika.pdf"].startswith("damaged PDF")
     row = _query(kb, "SELECT status, error_msg FROM files WHERE path = 'docs/matrika.pdf'")[0]
     assert (row["status"], row["error_msg"]) == ("ok", messages["docs/matrika.pdf"])
+
+
+def test_name_forms_slovak_variants():
+    forms = dict(name_forms("Anna", "Fábik", [], "F"))
+    assert forms["anna fabik"] == 1.0
+    assert forms["anna fabikova"] == 0.8 and forms["fabikovej anny"] == 0.8
+    assert forms["anny fabikovej"] == 0.8
+    assert "anny fabik" not in forms                     # both parts take the same case
+    assert all(len(f.split()) >= 2 for f in forms)
+    assert dict(name_forms("Ján", "Fabik", [], "M"))["janom fabikom"] == 0.8
+    assert name_forms(None, "Fabik", [], "M") == [] and name_forms("Anna", None, [], "F") == []
+
+
+def test_name_forms_never_lower_existing_confidence():
+    forms = dict(name_forms("Jan Josef", "Novák", ["Jan Novakova"], "M"))
+    assert forms["jan novakova"] == 1.0                  # tree variant stays exact
+    assert forms["jan josef novak"] == 1.0 and forms["j novak"] == 0.6
+
+
+def test_name_forms_gender_switch():
+    assert dict(name_forms("Jan", "Černý", [], "M"))["jan cerna"] == 0.8
+    assert dict(name_forms("Anna", "Fabiková", [], "F"))["anna fabik"] == 0.8
+    assert dict(name_forms("Anna", "Novotská", [], "F"))["anna novotsky"] == 0.8
