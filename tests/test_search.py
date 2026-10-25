@@ -2,8 +2,10 @@ from dataclasses import replace
 
 import pytest
 
-from genea.index.embed import EmbeddingError
+from genea.index.embed import EmbeddingError, FakeEmbedder
+from genea.index.indexer import index_kb
 from genea.kb import KnowledgeBase
+from genea.tool_runner import render
 from genea.tools.base import ToolError
 from genea.tools.search import find_images, read_document, search_documents
 
@@ -38,6 +40,47 @@ def test_search_falls_back_to_full_text(tools):
 def test_search_empty_query(tools):
     with pytest.raises(ToolError):
         search_documents(tools, "   ")
+
+
+def _long_docs(tools):
+    for i in range(12):
+        (tools.kb.root / "docs" / f"dlhy_{i}.txt").write_text("Jozef Fabik oral pole. " * 300, encoding="utf-8")
+    index_kb(tools.kb, FakeEmbedder())
+
+
+def test_default_search_fits_and_is_one_hit_per_file(tools):
+    _long_docs(tools)
+    result = search_documents(tools, "Jozef Fabik")
+    assert len(result.hits) == 8 and len({h.file for h in result.hits}) == 8
+    assert result.more_files >= 4
+    out = render(tools, result)
+    assert len(out) <= tools.kb.settings.tool_output_chars and '"truncated":true' not in out
+
+
+def test_search_largest_request_still_fits(tools):
+    _long_docs(tools)
+    out = render(tools, search_documents(tools, "Jozef Fabik", k=20, per_file=5))
+    assert len(out) <= tools.kb.settings.tool_output_chars and '"truncated":true' not in out
+
+
+def test_search_groups_chunks_by_file_and_counts_the_rest(tools):
+    _long_docs(tools)
+    result = search_documents(tools, "Jozef Fabik", k=2, per_file=2)
+    files = [h.file for h in result.hits]
+    assert len(set(files)) == 2 and files == sorted(files, key=files.index)  # each file's chunks together
+    assert result.more_files >= 10 and result.more_chunks >= result.more_files
+
+
+def test_prefix_matches_declined_forms(tools):
+    (tools.kb.root / "docs" / "list.txt").write_text("Pozdravujem pani Fabikovej.", encoding="utf-8")
+    index_kb(tools.kb, FakeEmbedder())
+    result = search_documents(replace(tools, embedder=BrokenEmbedder()), "Fabik")
+    assert "docs/list.txt" in {h.file for h in result.hits}
+
+
+@pytest.mark.parametrize("query", ['"Fabik', 'Fabik" OR', "NEAR(a b) * - ^ :", "Fabik's (1890)", "AND"])
+def test_search_survives_fts_syntax_in_query(tools, query):
+    search_documents(replace(tools, embedder=BrokenEmbedder()), query)
 
 
 def test_read_document(tools):

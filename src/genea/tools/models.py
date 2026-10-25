@@ -113,6 +113,8 @@ class DocHit(BaseModel):
 class SearchResult(ToolResult):
     query: str
     hits: list[DocHit]
+    more_files: int = 0  # at least this many more candidate files matched but were not returned
+    more_chunks: int = 0  # at least this many more candidate chunks matched but were not returned
     note: str | None = None
 
 
