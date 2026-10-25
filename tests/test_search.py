@@ -101,7 +101,18 @@ def test_search_snippet_centres_on_the_name_not_on_short_filler_words(tools):
     assert "Fábik" in hit.text
 
 
-@pytest.mark.parametrize("query", ['"Fabik', 'Fabik" OR', "NEAR(a b) * - ^ :", "Fabik's (1890)", "AND"])
+def test_search_snippet_centres_on_the_name_not_on_early_question_words(tools):
+    # long question words ("kedy", "narodil") occur early; the name only ~2,000 characters later
+    text = ("Kedy sa narodil prvý učiteľ, nevieme. " + "Kronika obce. " * 140
+            + "Štefan Fábik sa narodil v roku 1890.")
+    (tools.kb.root / "docs" / "list.txt").write_text(text, encoding="utf-8")
+    index_kb(tools.kb, FakeEmbedder())
+    result = search_documents(replace(tools, embedder=BrokenEmbedder()), "kedy sa narodil Štefan Fábik")
+    hit = next(h for h in result.hits if h.file == "docs/list.txt")
+    assert "Fábik" in hit.text
+
+
+@pytest.mark.parametrize("query", ['"Fabik','Fabik" OR', "NEAR(a b) * - ^ :", "Fabik's (1890)", "AND"])
 def test_search_survives_fts_syntax_in_query(tools, query):
     (tools.kb.root / "docs" / "list.txt").write_text("Pozdravujem pani Fabikovej.", encoding="utf-8")
     index_kb(tools.kb, FakeEmbedder())

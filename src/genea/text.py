@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import re
 import unicodedata
 
@@ -36,25 +37,9 @@ def _normalize_with_map(text: str) -> tuple[str, list[int]]:
     return "".join(out), index
 
 
-def snippet(text: str, needles: list[str], width: int) -> str:
-    """At most `width` characters of the original text around the earliest needle match. A needle starts at a word
-    boundary; one of PREFIX_MIN+ characters may end inside a word (as a prefix), a shorter one must end the word."""
-    norm, index = _normalize_with_map(text)
-    best: tuple[int, int] | None = None
-    for needle in needles:
-        if not needle:
-            continue
-        tail = "" if len(needle) >= PREFIX_MIN else r"(?!\w)"
-        m = re.search(r"(?<!\w)" + re.escape(needle) + tail, norm)
-        if m and (best is None or m.start() < best[0]):
-            best = (m.start(), m.end())
-    n = len(text)
-    if best is None:
-        return text if n <= width else text[:max(width - 1, 0)] + "…"
-    start = index[best[0]]
-    end = index[best[1] - 1] + 1
-    while end < n and unicodedata.combining(text[end]):
-        end += 1
+def _window(start: int, end: int, n: int, width: int) -> tuple[int, int]:
+    """The `width`-character window of an n-character text centred on [start, end), minus one character at each cut
+    end to make room for the "…"."""
     lo = max(0, (start + end) // 2 - width // 2)
     hi = min(n, lo + width)
     lo = max(0, hi - width)
@@ -62,4 +47,39 @@ def snippet(text: str, needles: list[str], width: int) -> str:
         lo += 1
     if hi < n:
         hi -= 1
+    return lo, hi
+
+
+def snippet(text: str, needles: list[str], width: int) -> str:
+    """At most `width` characters of the original text around needle matches: the window, centred on one match, that
+    shows the most distinct needles; ties go to the longer needles (rarer words), then to the earliest window.
+    A needle starts at a word boundary; one of PREFIX_MIN+ characters may end inside a word (as a prefix), a shorter
+    one must end the word."""
+    norm, index = _normalize_with_map(text)
+    n = len(text)
+    matches: list[tuple[int, int, str]] = []  # (start, end) in the original text, needle
+    for needle in dict.fromkeys(needles):
+        if not needle:
+            continue
+        tail = "" if len(needle) >= PREFIX_MIN else r"(?!\w)"
+        for m in re.finditer(r"(?<!\w)" + re.escape(needle) + tail, norm):
+            start = index[m.start()]
+            end = index[m.end() - 1] + 1
+            while end < n and unicodedata.combining(text[end]):
+                end += 1
+            matches.append((start, end, needle))
+    if not matches:
+        return text if n <= width else text[:max(width - 1, 0)] + "…"
+    matches.sort()
+    starts = [s for s, _, _ in matches]
+    best: tuple[int, int, int] | None = None  # (distinct needles, their total length, -lo)
+    best_window = (0, 0)
+    for start, end, _ in matches:
+        lo, hi = _window(start, end, n, width)
+        inside = matches[bisect.bisect_left(starts, lo):bisect.bisect_left(starts, hi)]
+        shown = {needle for _, e, needle in inside if e <= hi}
+        score = (len(shown), sum(len(needle) for needle in shown), -lo)
+        if best is None or score > best:
+            best, best_window = score, (lo, hi)
+    lo, hi = best_window
     return ("…" if lo > 0 else "") + text[lo:hi] + ("…" if hi < n else "")

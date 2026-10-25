@@ -40,6 +40,29 @@ def test_snippet_long_needles_match_as_prefixes():
     assert "Fabikovej" in s
 
 
+def test_snippet_prefers_the_window_with_the_most_needles():
+    from genea.text import snippet
+    text = ("Kedy sa narodil prvý učiteľ, nevieme. " + "Kronika obce. " * 140
+            + "Štefan Fábik sa narodil v roku 1890." + " Koniec." * 20)
+    s = snippet(text, ["kedy", "narodil", "stefan", "fabik"], 1000)
+    assert "Štefan" in s and "Fábik" in s
+    assert len(s) <= 1000
+
+
+def test_snippet_ties_prefer_the_earliest_match():
+    from genea.text import snippet
+    text = "Fabik prvy. " + "Kronika obce. " * 100 + "Fabik druhy. " + "Kronika obce. " * 100 + "Fabik treti."
+    s = snippet(text, ["fabik"], 60)
+    assert "prvy" in s and "druhy" not in s and "treti" not in s
+
+
+def test_snippet_ties_prefer_longer_needles():
+    from genea.text import snippet
+    text = "Kedy prisiel. " + "Kronika obce. " * 100 + "Fabikova tu. " + "Kronika obce. " * 100
+    s = snippet(text, ["kedy", "fabikova"], 60)
+    assert "Fabikova" in s
+
+
 def test_snippet_short_needles_stay_whole_words():
     from genea.text import snippet
     assert snippet("Janasik " * 50 + "pan Jan.", ["jan"], 20).endswith("pan Jan.")  # not the first Janasik
