@@ -11,6 +11,7 @@ from genea.index.embed import EmbeddingError
 from genea.ingest.docs import DOC_EXTS, extract_document
 from genea.ingest.transcript import Segment, format_time
 from genea.text import PREFIX_MIN, normalize, snippet
+from genea.tools.family import family_key
 from genea.tools.base import ToolContext, ToolError, parse_person_id
 from genea.tools.models import DocHit, DocumentText, ImageOut, ImageResult, SearchResult, SourceRef
 
@@ -57,6 +58,7 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
     for chunk_id, score in ranked:
         if chunk_id in file_of:  # a vector row without a chunk row is skipped, not a KeyError
             groups.setdefault(file_of[chunk_id], []).append((chunk_id, score))
+    also = _fold_families(ctx, groups)
     chosen = [chunks[:per_file] for chunks in list(groups.values())[:k]]
     picked = [hit for chunks in chosen for hit in chunks]
     width = min(1500, max(200, (ctx.kb.settings.tool_output_chars - RESULT_OVERHEAD) // max(len(picked), 1) - 400))
@@ -72,6 +74,11 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
         source = SourceRef(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"])
         hits.append(DocHit(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"],
                            end_s=row["end_s"], kind=row["kind"], text=text, score=round(score, 4), source=source))
+    first_chunk = {}
+    for h in hits:
+        first_chunk.setdefault(h.file, h)
+    for h in first_chunk.values():
+        h.also = also.get(h.file, [])
     result = SearchResult(query=query, hits=hits, note=note)
     # The width floor (200) cannot fit k=20 x per_file=5 passages; drop extra chunks of a file first, then whole
     # files, worst first, until the result fits and the tool runner never has to cut strings.
@@ -87,6 +94,27 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
     result.more_files = len(groups) - len(returned)
     result.more_chunks = sum(len(chunks) for chunks in groups.values()) - len(hits)
     return result
+
+
+def _fold_families(ctx: ToolContext, groups: dict[int, list[tuple[int, float]]]) -> dict[str, list[str]]:
+    """Fold the files that are other sides of a better-ranked file's document into it (removed from `groups`).
+    Returns the folded paths by the path of the file that stays."""
+    paths: dict[int, str] = {}
+    ids = list(groups)
+    for i in range(0, len(ids), 500):
+        batch = ids[i:i + 500]
+        rows = ctx.conn.execute(f"SELECT id, path FROM files WHERE id IN ({','.join('?' * len(batch))})", batch)
+        paths.update((r[0], r[1]) for r in rows)
+    first_of: dict[str, int] = {}
+    also: dict[str, list[str]] = {}
+    for file_id in ids:
+        if file_id not in paths:
+            continue
+        first = first_of.setdefault(family_key(paths[file_id]), file_id)
+        if first != file_id:
+            also.setdefault(paths[first], []).append(paths[file_id])
+            del groups[file_id]
+    return also
 
 
 def _chunk_files(ctx: ToolContext, chunk_ids: list[int]) -> dict[int, int]:
