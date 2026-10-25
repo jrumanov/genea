@@ -18,6 +18,7 @@ import sqlite_vec
 from genea.exiftool import ExifToolError
 from genea.index.db import open_index, set_index_state
 from genea.index import summary_cache
+from genea.names import married_surnames
 from genea.index.embed import Embedder
 from genea.index.progress import IndexDbLocked, IndexInUse, IndexLock, IndexProgress, clear_progress, now_iso, write_progress
 from genea.ingest.docs import DOC_EXTS, chunk_pages, chunk_segments, extract_document, read_transcript, summary_chunks
@@ -91,11 +92,17 @@ def file_hash(path: Path, kind: str) -> str:
 def _ingest_ged(conn, kb, embedder, path, file_id) -> tuple[str, str | None]:
     data = map_gedcom(parse_gedcom(path))
     ged = kb.rel(path)
+    surname_of = {p.xref: p.surname for p in data.persons}
+    husbands: dict[str, list[str]] = {}
+    for f in data.families:
+        if f.wife_xref and f.husband_xref in surname_of:
+            husbands.setdefault(f.wife_xref, []).append(surname_of[f.husband_xref])
     conn.executemany(
         "INSERT OR IGNORE INTO persons (file_id, ged_file, xref, given, surname, sex, name_norm, "
         "names_norm, name_variants, notes, line_no) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [(file_id, ged, p.xref, p.given, p.surname, p.sex, normalize(f"{p.given} {p.surname}"),
-          " | ".join(normalize(v) for v in p.name_variants) or normalize(f"{p.given} {p.surname}"),
+          " | ".join([normalize(v) for v in p.name_variants] + _married_names(p.given, husbands.get(p.xref, ())))
+          or normalize(f"{p.given} {p.surname}"),
           json.dumps(p.name_variants, ensure_ascii=False), p.notes, p.line_no) for p in data.persons],
     )
     conn.executemany(
@@ -228,6 +235,14 @@ def _index_one(conn, kb, embedder, path, kind, digest, old_id, report: IndexRepo
             report.problems.append((rel, message))
 
 
+def _married_names(given: str | None, husband_surnames) -> list[str]:
+    """Searchable (not stored) names a wife is known by through her husbands' surnames."""
+    return [normalize(f"{given or ''} {s}") for h in husband_surnames for s in married_surnames(h)]
+
+
+MARRIED_CONFIDENCE = 0.8  # a derived name is weaker evidence than one recorded in the tree
+
+
 def name_forms(given: str | None, surname: str | None, variants: list[str]) -> list[tuple[str, float]]:
     """Normalized name spellings to look for in text, with a confidence for each."""
     forms: dict[str, float] = {}
@@ -251,9 +266,20 @@ def rebuild_links(conn: sqlite3.Connection) -> None:
     # is in a text exactly when its words are consecutive words of the text: look the text's word
     # sequences up here instead of searching every form of every person in every text.
     by_form: dict[str, list[tuple[int, str, str, float]]] = {}
-    for number, r in enumerate(conn.execute("SELECT ged_file, xref, given, surname, name_variants FROM persons")):
+    numbers = {(r["ged_file"], r["xref"]): n for n, r in enumerate(
+        conn.execute("SELECT ged_file, xref FROM persons ORDER BY id"))}
+    for r in conn.execute("SELECT ged_file, xref, given, surname, name_variants FROM persons ORDER BY id"):
+        number = numbers[(r["ged_file"], r["xref"])]
         for form, conf in name_forms(r["given"], r["surname"], json.loads(r["name_variants"])):
             by_form.setdefault(form, []).append((number, r["ged_file"], r["xref"], conf))
+    for r in conn.execute(
+            "SELECT p.ged_file, p.xref, p.given, h.surname FROM families f "
+            "JOIN persons p ON p.ged_file = f.ged_file AND p.xref = f.wife_xref "
+            "JOIN persons h ON h.ged_file = f.ged_file AND h.xref = f.husband_xref WHERE h.surname IS NOT NULL"):
+        for surname in married_surnames(r["surname"]):
+            for form, conf in name_forms(r["given"], surname, []):
+                by_form.setdefault(form, []).append(
+                    (numbers[(r["ged_file"], r["xref"])], r["ged_file"], r["xref"], round(conf * MARRIED_CONFIDENCE, 2)))
     form_lengths = sorted({len(form.split()) for form in by_form})
     sources = [("chunk", r["id"], normalize(r["text"])) 
                for r in conn.execute("SELECT id, text FROM chunks WHERE kind = 'text'")]  # never generated text
