@@ -9,6 +9,11 @@ def test_shared_rules_are_in_both():
         assert needle in MCP_INSTRUCTIONS
 
 
+def test_documents_about_is_in_both():
+    assert "documents_about" in SYSTEM_PROMPT
+    assert "documents_about" in MCP_INSTRUCTIONS
+
+
 def test_agent_prompt_keeps_write_rules():
     assert "propose_change" in SYSTEM_PROMPT
     assert "write_note" in SYSTEM_PROMPT

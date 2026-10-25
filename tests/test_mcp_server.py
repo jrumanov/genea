@@ -17,11 +17,11 @@ from genea.index.indexer import index_kb  # noqa: E402
 from genea.index.progress import IndexLock, IndexProgress, now_iso, write_progress  # noqa: E402
 from genea.mcp_server import IndexGate, build_server  # noqa: E402
 from genea.tool_runner import run_tool  # noqa: E402
-from genea.tools import conflicts, people, search  # noqa: E402
+from genea.tools import conflicts, mentions, people, search  # noqa: E402
 from genea.tools.base import open_tools  # noqa: E402
 
 READ_ONLY = {"find_person", "get_person", "relatives", "timeline", "search_documents",
-             "read_document", "find_images", "find_conflicts"}
+             "documents_about", "read_document", "find_images", "find_conflicts"}
 MCP_ONLY = {"index_status"}
 JAN = "tree.ged#@I12@"
 
@@ -31,7 +31,8 @@ CASES = [
     ("get_person", {"person_id": JAN}, people.get_person, (JAN,)),
     ("relatives", {"person_id": JAN, "relation": "ancestors", "depth": 2}, people.relatives, (JAN, "ancestors", 2)),
     ("timeline", {"person_id": JAN}, people.timeline, (JAN,)),
-    ("search_documents", {"query": "Josef", "k": 3}, search.search_documents, ("Josef", 3)),
+    ("search_documents", {"query": "Josef", "k": 3}, search.search_documents, ("Josef", 3, 1)),
+    ("documents_about", {"person_id": JAN}, mentions.documents_about, (JAN, 1)),
     ("read_document", {"path": "docs/kronika.txt"}, search.read_document, ("docs/kronika.txt", None, None)),
     ("find_images", {"text": "Anna"}, search.find_images, (None, None, None, None, "Anna")),
     ("find_conflicts", {"person_id": JAN}, conflicts.find_conflicts, (JAN,)),

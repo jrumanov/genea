@@ -104,7 +104,7 @@ def test_stdio_server_end_to_end(sample_root, tmp_path):
     assert init.instructions.startswith(MCP_INSTRUCTIONS)
     assert "Index state when this session started: The index is complete." in init.instructions
     assert {t.name for t in listed.tools} == {
-        "find_person", "get_person", "relatives", "timeline", "search_documents",
+        "find_person", "get_person", "relatives", "timeline", "search_documents", "documents_about",
         "read_document", "find_images", "find_conflicts", "index_status",
         "analyze", "read_analysis", "propose", "withdraw", "add_analysis_note", "build_iteration",
         "dna_summary", "haplogroups", "snp_lookup"}

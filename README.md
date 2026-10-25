@@ -27,7 +27,7 @@ to read image metadata and to write XMP sidecars. `genea doctor` diagnoses all o
 ## Use with Claude (MCP)
 
 `genea mcp` serves the knowledge base to Claude Code or Claude Desktop as an MCP server (search, people,
-relatives, timelines, documents, photos, conflict checks). It is read-only except for analyses, which it
+relatives, timelines, documents (including `documents_about`, every document that mentions a person), photos, conflict checks). It is read-only except for analyses, which it
 writes only under `.genea/analyses/`: the tools `analyze`, `read_analysis`, `propose`, `withdraw`,
 `add_analysis_note` and `build_iteration` (see [Analyses](#analyses-proposing-corrections-to-the-tree)).
 The tree itself is never changed, and dismissing a finding is CLI only.

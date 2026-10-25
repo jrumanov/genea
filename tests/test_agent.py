@@ -54,7 +54,7 @@ def test_tool_error_is_returned_as_result(tools):
 
 
 def test_unexpected_tool_exception_is_returned_as_result(tools, monkeypatch):
-    def boom(ctx, query, k=8):
+    def boom(ctx, query, k=8, per_file=1):
         raise RuntimeError("corrupt vec table")
 
     monkeypatch.setattr("genea.agent.core.search.search_documents", boom)
@@ -148,7 +148,7 @@ def test_repeatedly_failing_tool_does_not_end_the_run(tools):
 
 
 def test_huge_error_message_is_capped(tools, monkeypatch):
-    def boom(ctx, query, k=8):
+    def boom(ctx, query, k=8, per_file=1):
         raise RuntimeError("x" * 5000)
 
     monkeypatch.setattr("genea.agent.core.search.search_documents", boom)
