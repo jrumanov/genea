@@ -113,7 +113,37 @@ class DocHit(BaseModel):
 class SearchResult(ToolResult):
     query: str
     hits: list[DocHit]
+    more_files: int = 0  # at least this many more candidate files matched but were not returned
+    more_chunks: int = 0  # at least this many more candidate chunks matched but were not returned
     note: str | None = None
+
+
+class Mention(BaseModel):
+    page: int | None = None
+    chunk: int
+    start_s: float | None = None
+    snippet: str
+
+
+class DocumentMentions(BaseModel):
+    file: str
+    match: Literal["exact", "variant", "weak"]
+    confidence: float
+    chunks: int  # matching chunks in this file
+    ambiguous: bool
+    mentions: list[Mention]  # at most MENTIONS_PER_FILE
+    source: SourceRef
+
+
+class PersonDocuments(ToolResult):
+    person: PersonSummary
+    total_files: int
+    total_chunks: int
+    ambiguous_files: int
+    page: int
+    pages: int
+    files: list[DocumentMentions]
+    note: str
 
 
 class DocumentText(ToolResult):

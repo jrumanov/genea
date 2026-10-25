@@ -10,24 +10,29 @@ import sqlite_vec
 from genea.index.embed import EmbeddingError
 from genea.ingest.docs import DOC_EXTS, extract_document
 from genea.ingest.transcript import Segment, format_time
-from genea.text import normalize
+from genea.text import PREFIX_MIN, normalize, snippet
 from genea.tools.base import ToolContext, ToolError, parse_person_id
 from genea.tools.models import DocHit, DocumentText, ImageOut, ImageResult, SearchResult, SourceRef
 
 RRF_K = 60
-CANDIDATES = 30
+CANDIDATES = 100
 
 
 def _fts_query(text: str) -> str | None:
+    """An FTS5 OR query of the words in `text`. Each word is a quoted phrase (a word never contains a quote, so
+    no FTS syntax from the user's query survives); words of PREFIX_MIN+ characters become prefix queries."""
     tokens = re.findall(r"\w+", text)
-    return " OR ".join(f'"{t}"' for t in tokens) or None
+    return " OR ".join(f'"{t}"*' if len(t) >= PREFIX_MIN else f'"{t}"' for t in tokens) or None
 
 
-def search_documents(ctx: ToolContext, query: str, k: int = 8) -> SearchResult:
-    """Hybrid search: FTS5 (BM25) + vector KNN, merged with reciprocal rank fusion."""
+def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1) -> SearchResult:
+    """Hybrid search: FTS5 (BM25) + vector KNN, merged with reciprocal rank fusion. Up to `k` files, each with up to
+    its best `per_file` chunks as space allows: passages are cut around the match and, if needed, extra chunks and
+    then the worst files are dropped so the whole result fits tool_output_chars (more_files/more_chunks count them)."""
     if not query.strip():
         raise ToolError("Give a search query.")
     k = max(1, min(k, 20))
+    per_file = max(1, min(per_file, 5))
     scores: dict[int, float] = {}
     fts = _fts_query(query)
     if fts:
@@ -46,16 +51,58 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8) -> SearchResult:
             scores[row[0]] = scores.get(row[0], 0.0) + 1 / (RRF_K + rank)
     except EmbeddingError as exc:
         note = f"semantic search unavailable, used full-text search only: {exc}"
+    ranked = sorted(scores.items(), key=lambda item: -item[1])
+    file_of = _chunk_files(ctx, [chunk_id for chunk_id, _ in ranked])
+    groups: dict[int, list[tuple[int, float]]] = {}  # file id -> its chunks, best first; files in rank order
+    for chunk_id, score in ranked:
+        if chunk_id in file_of:  # a vector row without a chunk row is skipped, not a KeyError
+            groups.setdefault(file_of[chunk_id], []).append((chunk_id, score))
+    chosen = [chunks[:per_file] for chunks in list(groups.values())[:k]]
+    picked = [hit for chunks in chosen for hit in chunks]
+    width = min(1500, max(200, (ctx.kb.settings.tool_output_chars - RESULT_OVERHEAD) // max(len(picked), 1) - 400))
+    words = re.findall(r"\w+", normalize(query))  # the same words the FTS query is built from
+    # short words ("sa", "v", "o") match almost anywhere and would pull the snippet away from the name
+    needles = [w for w in words if len(w) >= PREFIX_MIN] or words
     hits = []
-    for chunk_id, score in sorted(scores.items(), key=lambda item: -item[1])[:k]:
+    for chunk_id, score in picked:
         row = ctx.conn.execute(
             "SELECT c.page, c.chunk_no, c.text, c.start_s, c.end_s, c.kind, f.path FROM chunks c "
             "JOIN files f ON f.id = c.file_id WHERE c.id = ?", (chunk_id,)).fetchone()
+        text, _ = _fit(snippet(row["text"], needles, width), width)
         source = SourceRef(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"])
         hits.append(DocHit(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"],
-                           end_s=row["end_s"], kind=row["kind"], text=row["text"][:1500],
-                           score=round(score, 4), source=source))
-    return SearchResult(query=query, hits=hits, note=note, sources=[h.source for h in hits])
+                           end_s=row["end_s"], kind=row["kind"], text=text, score=round(score, 4), source=source))
+    result = SearchResult(query=query, hits=hits, note=note)
+    # The width floor (200) cannot fit k=20 x per_file=5 passages; drop extra chunks of a file first, then whole
+    # files, worst first, until the result fits and the tool runner never has to cut strings.
+    while hits and len(_result_json(result, hits)) > ctx.kb.settings.tool_output_chars:
+        counts: dict[str, int] = {}
+        for h in hits:
+            counts[h.file] = counts.get(h.file, 0) + 1
+        drop = next((i for i in range(len(hits) - 1, -1, -1) if counts[hits[i].file] > 1), len(hits) - 1)
+        del hits[drop]
+    returned = {h.file for h in hits}
+    result.hits = hits
+    result.sources = [h.source for h in hits]
+    result.more_files = len(groups) - len(returned)
+    result.more_chunks = sum(len(chunks) for chunks in groups.values()) - len(hits)
+    return result
+
+
+def _chunk_files(ctx: ToolContext, chunk_ids: list[int]) -> dict[int, int]:
+    file_of: dict[int, int] = {}
+    for i in range(0, len(chunk_ids), 500):
+        batch = chunk_ids[i:i + 500]
+        rows = ctx.conn.execute(f"SELECT id, file_id FROM chunks WHERE id IN ({','.join('?' * len(batch))})", batch)
+        file_of.update((r[0], r[1]) for r in rows)
+    return file_of
+
+
+def _result_json(result: SearchResult, hits: list[DocHit]) -> str:
+    """What the tool runner renders for `result` with these hits (worst case for the two counts: 3 digits each)."""
+    probe = result.model_copy(update={"hits": hits, "sources": [h.source for h in hits],
+                                      "more_files": 999, "more_chunks": 999})
+    return probe.model_dump_json(exclude_none=True)
 
 
 RESULT_OVERHEAD = 600  # characters of tool_output_chars kept for the other fields of a DocumentText

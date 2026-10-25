@@ -38,6 +38,7 @@ QUESTIONS = [
     ("What was the occupation of Josef Novák born 1820?", ["sedl"]),
     ("Koho si vzala Ludmila Nováková?", ["Jindřich"]),
     ("When did Anna Svobodová die?", ["1890"]),
+    ("What do the documents say about Anna Svobodová?", ["1845"]),
     ("Is there a letter about Karel Novák's wedding?", ["dopis", "1895"]),
 ]
 
