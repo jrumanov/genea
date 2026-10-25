@@ -60,7 +60,9 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
     chosen = [chunks[:per_file] for chunks in list(groups.values())[:k]]
     picked = [hit for chunks in chosen for hit in chunks]
     width = min(1500, max(200, (ctx.kb.settings.tool_output_chars - RESULT_OVERHEAD) // max(len(picked), 1) - 400))
-    needles = re.findall(r"\w+", normalize(query))  # the same words the FTS query is built from
+    words = re.findall(r"\w+", normalize(query))  # the same words the FTS query is built from
+    # short words ("sa", "v", "o") match almost anywhere and would pull the snippet away from the name
+    needles = [w for w in words if len(w) >= PREFIX_MIN] or words
     hits = []
     for chunk_id, score in picked:
         row = ctx.conn.execute(

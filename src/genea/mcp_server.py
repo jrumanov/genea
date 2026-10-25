@@ -133,7 +133,7 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
 
     @server.tool(structured_output=False)
     async def search_documents(query: str, k: int = 8, per_file: int = 1) -> str:
-        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page (or, for recordings, the time in the recording). Returns one passage per file unless per_file is higher; more_files and more_chunks say how many more matches exist at least."""
+        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page (or, for recordings, the time in the recording). Returns one passage per file unless per_file is higher; more_files and more_chunks count candidate files and passages not returned (a lower bound, not all of them are matches)."""
         return run(search.search_documents, query, k, per_file)
 
     @server.tool(structured_output=False)

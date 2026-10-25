@@ -5,7 +5,7 @@ from genea.index.embed import FakeEmbedder
 from genea.index.indexer import index_kb
 from genea.ingest.summarize import FakeSummarizer
 from genea.tool_runner import TRUNCATION_MARKER, render
-from genea.tools.base import ToolError, open_tools
+from genea.tools.base import ToolError
 from genea.tools.mentions import documents_about
 
 

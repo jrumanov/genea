@@ -91,6 +91,16 @@ def test_search_snippet_shows_a_declined_form_deep_in_a_long_chunk(tools):
     assert "Fabikovej" in hit.text
 
 
+def test_search_snippet_centres_on_the_name_not_on_short_filler_words(tools):
+    # short words of the question ("sa") occur from the start; the name only past 1,500 characters
+    text = "Tak sa v obci o tom hovorilo. " * 60 + "Narodil sa Štefan Fábik v roku 1890."
+    (tools.kb.root / "docs" / "list.txt").write_text(text, encoding="utf-8")
+    index_kb(tools.kb, FakeEmbedder())
+    result = search_documents(replace(tools, embedder=BrokenEmbedder()), "kedy sa narodil Štefan Fábik")
+    hit = next(h for h in result.hits if h.file == "docs/list.txt")
+    assert "Fábik" in hit.text
+
+
 @pytest.mark.parametrize("query", ['"Fabik', 'Fabik" OR', "NEAR(a b) * - ^ :", "Fabik's (1890)", "AND"])
 def test_search_survives_fts_syntax_in_query(tools, query):
     (tools.kb.root / "docs" / "list.txt").write_text("Pozdravujem pani Fabikovej.", encoding="utf-8")

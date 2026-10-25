@@ -9,7 +9,7 @@ def _empty(word: str) -> dict[str, set[str]]:
     return out
 
 
-def _add(out: dict[str, set[str]], word: str, forms: dict[str, tuple[str, ...]], stem: str) -> None:
+def _add(out: dict[str, set[str]], forms: dict[str, tuple[str, ...]], stem: str) -> None:
     for case, endings in forms.items():
         for e in endings:
             out[case].add(stem + e)
@@ -31,24 +31,24 @@ def _feminine(word: str, surname: bool, out: dict[str, set[str]]) -> None:
         forms = {"gen": ("ej",), "dat": ("ej",), "acc": ("u",), "loc": ("ej",), "ins": ("ou",)}
     else:
         forms = {"gen": ("y", "e"), "dat": ("e",), "acc": ("u",), "loc": ("e",), "ins": ("ou",)}
-    _add(out, word, forms, stem)
+    _add(out, forms, stem)
 
 
 def _masculine(word: str, surname: bool, out: dict[str, set[str]]) -> None:
     if surname and word[-1:] in ("y", "i"):
         stem = word[:-1]
-        _add(out, word, {"gen": ("eho",), "dat": ("emu",), "acc": ("eho",), "loc": ("om",), "ins": ("ym",)}, stem)
+        _add(out, {"gen": ("eho",), "dat": ("emu",), "acc": ("eho",), "loc": ("om",), "ins": ("ym",)}, stem)
         return
     if word.endswith("a"):
-        _add(out, word, {"gen": ("u",), "dat": ("ovi",), "acc": ("u",), "loc": ("ovi",), "ins": ("om",)}, word[:-1])
+        _add(out, {"gen": ("u",), "dat": ("ovi",), "acc": ("u",), "loc": ("ovi",), "ins": ("om",)}, word[:-1])
         return
     if word.endswith("o"):
-        _add(out, word, {"gen": ("a",), "dat": ("ovi",), "acc": ("a",), "loc": ("ovi",), "ins": ("om",)}, word[:-1])
+        _add(out, {"gen": ("a",), "dat": ("ovi",), "acc": ("a",), "loc": ("ovi",), "ins": ("om",)}, word[:-1])
         return
     forms = {"gen": ("a",), "dat": ("ovi",), "acc": ("a",), "loc": ("ovi",), "ins": ("om",)}
-    _add(out, word, forms, word)
+    _add(out, forms, word)
     if word.endswith(("ek", "ec")) and len(word) > 3:
-        _add(out, word, forms, word[:-2] + word[-1])
+        _add(out, forms, word[:-2] + word[-1])
 
 
 def _cases(word: str, sex: str | None, surname: bool) -> dict[str, set[str]]:

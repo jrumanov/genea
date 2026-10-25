@@ -39,8 +39,8 @@ def test_rebuild_links_matches_the_exhaustive_search(tmp_path):
                      "name_variants, line_no, sex) VALUES (1, 'a.ged', ?, ?, ?, '', '', ?, 1, ?)",
                      (f"@I{i}@", rng.choice(givens), rng.choice(surnames), json.dumps(variants),
                       rng.choice(["M", "F", None])))
-    words = ["Jan", "Josef", "Marie", "Anna", "Zofie", "Karel", "Novák", "Nowak", "Cerny", "Dvořák", "Annou", "Novákovou", "Novákovi", "Dvořákova", "Jana", "J.", "A.",
-             "se", "narodil", "v", "Brně", "Johann", "Novak"]
+    words = ["Jan", "Josef", "Marie", "Anna", "Zofie", "Karel", "Novák", "Nowak", "Cerny", "Dvořák", "Annou",
+             "Novákovou", "Novákovi", "Dvořákova", "Jana", "J.", "A.", "se", "narodil", "v", "Brně", "Johann", "Novak"]
     for i in range(30):
         conn.execute("INSERT INTO files (id, path, kind, sha256, mtime, indexed_at, status) "
                      "VALUES (?, ?, 'doc', 'x', 0, 'n', 'ok')", (i + 2, f"d{i}.txt"))

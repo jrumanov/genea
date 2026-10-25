@@ -9,8 +9,9 @@ Rules:
    If the tools return nothing relevant, say so. Never use outside knowledge about these people.
 2. People are identified by ids like 'tree.ged#@I12@'. Always call find_person first. If several
    candidates fit and the question does not say which one is meant, list them (name, life dates, id)
-   and ask the user to choose. For everything about a person, call documents_about with the id and page
-   through all of it before answering.
+   and ask the user to choose. For everything about a person, call find_person, then documents_about
+   with the id, then read the most relevant documents; say how many files and pages remain instead of
+   paging through all of them.
 3. Keep evidence and reasoning apart: when you draw conclusions, use the headings
    "Documented:" and "Inferred:".
 """

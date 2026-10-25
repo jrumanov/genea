@@ -38,7 +38,7 @@ def documents_about(ctx: ToolContext, person_id: str, page: int = 1) -> PersonDo
     person = summary(ctx.conn, ged, xref)
     me = ctx.conn.execute("SELECT * FROM persons WHERE ged_file = ? AND xref = ?", (ged, xref)).fetchone()
     forms = _forms(me)
-    rows = [] if not forms else ctx.conn.execute(  # no name, nothing to find (and no snippet to centre)
+    rows = [] if not forms else ctx.conn.execute(  # nothing can be linked without a given name and surname
         "SELECT c.id, c.page, c.chunk_no, c.start_s, c.text, f.path, l.confidence FROM links l "
         "JOIN chunks c ON l.source_kind = 'chunk' AND c.id = l.source_id JOIN files f ON f.id = c.file_id "
         "WHERE l.person_ged_file = ? AND l.person_xref = ? AND c.kind = 'text'", (ged, xref)).fetchall()
