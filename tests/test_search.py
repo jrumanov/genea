@@ -59,9 +59,11 @@ def test_default_search_fits_and_is_one_hit_per_file(tools):
 
 def test_search_largest_request_still_fits(tools):
     _long_docs(tools)
-    result = search_documents(tools, "Jozef Fabik", k=20, per_file=5)
-    out = render(tools, result)
-    assert len(out) <= tools.kb.settings.tool_output_chars and '"truncated":true' not in out
+    # the compact hit JSON is small enough that all 16 x 5 passages fit in 12,000 characters: shrink the limit
+    small = replace(tools, kb=KnowledgeBase(tools.kb.root, replace(tools.kb.settings, tool_output_chars=8000)))
+    result = search_documents(small, "Jozef Fabik", k=20, per_file=5)
+    out = render(small, result)
+    assert len(out) <= small.kb.settings.tool_output_chars and '"truncated":true' not in out
     assert len({h.file for h in result.hits}) == 16 and result.more_files == 0  # every candidate file kept
     assert 16 < len(result.hits) <= 100 and result.more_chunks > 0  # trimmed extra chunks are counted
     assert [h.source for h in result.hits] == result.sources

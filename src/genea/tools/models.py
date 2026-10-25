@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from genea.ingest.transcript import format_time
 
@@ -102,16 +102,26 @@ class DocHit(BaseModel):
     file: str
     page: int | None = None
     start_s: float | None = None
-    end_s: float | None = None
+    end_s: float | None = Field(default=None, exclude=True)
     kind: str = "text"
     chunk: int
     text: str
-    score: float
-    source: SourceRef
+    score: float = Field(exclude=True)
+    source: SourceRef = Field(exclude=True)  # the result's `sources` carries it once
+    also: list[str] = Field(default_factory=list)  # other sides of the same document, e.g. harok_b for harok_a
+
+    @model_serializer(mode="wrap")
+    def _compact(self, handler):
+        data = handler(self)
+        if data.get("kind") == "text":
+            data.pop("kind", None)
+        if not data.get("also"):
+            data.pop("also", None)
+        return data
 
 
 class SearchResult(ToolResult):
-    query: str
+    query: str = Field(exclude=True)
     hits: list[DocHit]
     more_files: int = 0  # at least this many more candidate files matched but were not returned
     more_chunks: int = 0  # at least this many more candidate chunks matched but were not returned
