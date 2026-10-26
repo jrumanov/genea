@@ -19,7 +19,7 @@ def render_pdf(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: di
     except Exception as exc:
         return pages.notice("Cannot read this file", f"{type(exc).__name__}: {exc}")
     chunk = textview.find_chunk(conn, rel, params)
-    wanted = int(params["page"]) if params.get("page", "").isdigit() else None
+    wanted = pages.int_param(params, "page")
     if wanted is None and chunk is not None:
         wanted = chunk["page"]
     src = "/raw/" + quote(rel, safe="/") + (f"#page={wanted}" if wanted else "")
@@ -38,4 +38,6 @@ def render_pdf(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: di
             body = html.escape(page.text.strip())
         parts.append(f'<div class="page"><h2>Page {page.number}</h2><pre>{body}</pre></div>')
     note = textview.chunk_note() if "chunk" in params and not marked else ""
+    if not parts:
+        note += f'<p class="note">This PDF has no extracted text on page {wanted}.</p>'
     return pages.shell(rel, pages.header(rel) + frame + note + "".join(parts) + pages.SCROLL)

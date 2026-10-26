@@ -30,6 +30,12 @@ mark { background: var(--mark); color: inherit; }
 SCROLL = "<script>document.getElementById('hit')?.scrollIntoView({block:'center'})</script>"
 
 
+def int_param(params: dict[str, str], key: str) -> int | None:
+    """A non-negative ASCII-digit query value as int, else None (str.isdigit also accepts ² and ①)."""
+    value = params.get(key, "")
+    return int(value) if value.isascii() and value.isdigit() else None
+
+
 def shell(title: str, body: str) -> str:
     return ("<!doctype html><html lang=en><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width, initial-scale=1'>"

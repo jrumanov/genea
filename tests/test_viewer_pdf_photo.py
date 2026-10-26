@@ -100,3 +100,39 @@ def test_tiff_photo_has_no_img_tag(kb, start):
     body = pages.render(kb, conn, "photos/b.tif", {})
     assert "<img" not in body
     assert "Sken" in body and "cannot show" in body
+
+
+def test_unicode_digit_page_param_does_not_crash(kb, start):
+    url = start()
+    for path in ("/v/docs/matrika.pdf?page=%C2%B2", "/v/docs/poznamky.md?page=%E2%91%A0",
+                 "/v/tree.ged?line=%C2%B2", "/v/docs/kronika.txt?t=%C2%B2"):
+        assert get(url + path)[0] == 200, path
+
+
+def test_pdf_page_without_text_has_note(kb, start):
+    url = start()
+    for page in (0, 9):
+        status, body = get(url + f"/v/docs/matrika.pdf?page={page}")
+        assert status == 200 and "has no extracted text on page" in body
+
+
+def test_needs_ocr_allowed_only_for_docs(kb, start):
+    from genea.viewer.server import lookup
+    start()
+    (kb.root / "photos").mkdir(exist_ok=True)
+    conn = add_photo(kb, "photos/c.jpg", "C")
+    conn.execute("UPDATE files SET status = 'needs_ocr' WHERE path = 'photos/c.jpg'")
+    assert lookup(kb, conn, "photos/c.jpg") is None
+    assert lookup(kb, conn, "docs/sken.pdf") is not None
+
+
+def test_photo_alt_and_quoted_paths(kb, start):
+    start()
+    (kb.root / "photos").mkdir(exist_ok=True)
+    conn = add_photo(kb, "photos/a b#1%.jpg", 'Dom "x"')
+    body = pages.render(kb, conn, "photos/a b#1%.jpg", {})
+    assert 'src="/raw/photos/a%20b%231%25.jpg"' in body and 'alt="Dom &quot;x&quot;"' in body
+    from genea.viewer import pdfview
+    (kb.root / "docs" / "r s#1.pdf").write_bytes((kb.root / "docs" / "matrika.pdf").read_bytes())
+    page = pdfview.render_pdf(kb, conn, "docs/r s#1.pdf", {"page": "2"})
+    assert '<iframe src="/raw/docs/r%20s%231.pdf#page=2"' in page

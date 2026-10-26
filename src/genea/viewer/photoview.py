@@ -25,10 +25,11 @@ def _list(value: str | None) -> str:
 def render_photo(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str) -> str:
     row = conn.execute("SELECT i.* FROM images i JOIN files f ON f.id = i.file_id WHERE f.path = ?",
                        (rel,)).fetchone()
+    alt = html.escape(row["title"] or "") if row is not None else ""
     if Path(rel).suffix.lower() in NOT_SHOWN:
         picture = '<p class="note">Your browser cannot show this image format; open the original file instead.</p>'
     else:
-        picture = f'<img src="{html.escape("/raw/" + quote(rel, safe="/"))}" alt="" style="max-width:100%">'
+        picture = f'<img src="{html.escape("/raw/" + quote(rel, safe="/"))}" alt="{alt}" style="max-width:100%">'
     fields = []
     if row is not None:
         for label, value in (("Title", row["title"]), ("Description", row["description"]),

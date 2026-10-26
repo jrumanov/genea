@@ -52,7 +52,7 @@ def lookup(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str) -> FileRow | N
         return None
     row = conn.execute("SELECT id, path, kind, status FROM files WHERE path = ?",
                        (kb.rel(path),)).fetchone()
-    if row is None or row["status"] not in ("ok", "needs_ocr"):  # scanned PDFs are still viewable
+    if row is None or not (row["status"] == "ok" or (row["status"] == "needs_ocr" and row["kind"] == "doc")):
         return None
     file = FileRow(row["id"], row["path"], row["kind"], row["status"])
     if file.kind == "image":

@@ -41,7 +41,7 @@ def render_ged(kb: KnowledgeBase, rel: str, params: dict[str, str]) -> str:
         doc = parse_gedcom(kb.resolve_inside(rel))
     except Exception as exc:
         return pages.notice("Cannot read this file", f"{type(exc).__name__}: {exc}")
-    wanted = int(params["line"]) if params.get("line", "").isdigit() else None
+    wanted = pages.int_param(params, "line")
     rows = record_lines(doc, wanted) if wanted is not None else []
     note = ""
     if not any(n == wanted for n, _ in rows):

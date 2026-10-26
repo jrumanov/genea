@@ -45,7 +45,7 @@ def render_text(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: d
     except Exception as exc:
         return pages.notice("Cannot read this file", f"{type(exc).__name__}: {exc}")
     chunk = find_chunk(conn, rel, params)
-    wanted = int(params["page"]) if params.get("page", "").isdigit() else None
+    wanted = pages.int_param(params, "page")
     if all(p.number != wanted for p in extract.pages):
         wanted = None  # a document without that page (plain text has none): show everything
     parts, marked = [], False
@@ -82,8 +82,8 @@ def render_transcript(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str,
     note = ""
     if "chunk" in params and chunk is None or (chunk is not None and chunk["kind"] != "summary" and not hit):
         note = chunk_note()
-    if not hit and params.get("t", "").isdigit():
-        t = int(params["t"])
+    t = pages.int_param(params, "t")
+    if not hit and t is not None:
         first = next((i for i, s in enumerate(segments) if s.end >= t), None)
         if first is not None:
             hit = {first}
