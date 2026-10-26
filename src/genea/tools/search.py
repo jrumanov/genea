@@ -70,10 +70,12 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
         row = ctx.conn.execute(
             "SELECT c.page, c.chunk_no, c.text, c.start_s, c.end_s, c.kind, f.path FROM chunks c "
             "JOIN files f ON f.id = c.file_id WHERE c.id = ?", (chunk_id,)).fetchone()
-        text, _ = _fit(snippet(row["text"], needles, width), width)
+        shown = snippet(row["text"], needles, width)
+        text, fitted = _fit(shown, width)
         source = SourceRef(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"])
         hits.append(DocHit(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"],
-                           end_s=row["end_s"], kind=row["kind"], text=text, score=round(score, 4), source=source))
+                           end_s=row["end_s"], kind=row["kind"], text=text, cut=fitted or shown != row["text"],
+                           score=round(score, 4), source=source))
     first_chunk = {}
     for h in hits:
         first_chunk.setdefault(h.file, h)

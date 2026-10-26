@@ -26,7 +26,7 @@ convert = ["huggingface-hub>=0.30", "safetensors>=0.5", "numpy>=2"]
 genea = "genea.cli.main:app"
 
 [dependency-groups]
-dev = ["mcp>=2.3", "pillow>=12.0", "pytest>=8.4", "safetensors>=0.5", "reportlab>=5.0", "av>=14", "numpy>=2", "snps>=2.12"]
+dev = ["mcp>=2.3", "pillow>=12.0", "pytest>=8.4", "pytest-xdist>=3.6", "safetensors>=0.5", "reportlab>=5.0", "av>=14", "numpy>=2", "snps>=2.12"]
 
 [build-system]
 requires = ["hatchling"]
@@ -41,7 +41,7 @@ packages = ["src/genea"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
-addopts = "-m 'not live'"
+addopts = "-m 'not live' -n 10"
 markers = [
     "exiftool: needs the ExifTool binary (skipped automatically when it is missing)",
     "live: uses a real model, Ollama or whisper.cpp (run with `uv run pytest -m live`)",

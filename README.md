@@ -171,7 +171,8 @@ and call the mtDNA (maternal line) and Y (paternal line) haplogroups with free t
 | `ollama_url` | `http://localhost:11434` | Ollama server |
 | `exclude` | `[]` | Glob patterns to skip, e.g. `["private/**"]` |
 | `max_tool_calls` | `15` | Tool calls allowed per question |
-| `tool_output_chars` | `12000` | Truncation limit for each tool result |
+| `tool_output_chars` | `12000` | Truncation limit for each tool result of the built-in agent |
+| `mcp_output_chars` | `40000` | The same limit for `genea mcp` (Claude); keep it under Claude Code's MCP output limit (25,000 tokens by default) |
 | `privacy_notice` | `true` | Warn when a cloud model will receive your data |
 | `log_prompts` | `true` | Append every `ask`/`chat` question and answer to `.genea/prompts.md` (fill in `verdict`/`note` by hand to mark good and bad answers) |
 | `exiftool` | `exiftool` | Path to the ExifTool binary |

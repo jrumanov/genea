@@ -111,7 +111,7 @@ def test_tool_output_is_truncated(tools):
         ModelResponse(parts=[ToolCallPart("get_person", {"person_id": "tree.ged#@I3@"})]), final))
     text = ask(agent, _with_settings(tools, tool_output_chars=50), "q").text
     assert text.endswith("[truncated: narrow the query]")
-    assert len(text) < 120
+    assert len(text) < 300  # one source, truncated and cut_fields stay even when they alone exceed the limit
 
 
 def test_truncated_output_keeps_sources_marker_and_limit(tools):

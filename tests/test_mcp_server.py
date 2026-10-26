@@ -14,6 +14,7 @@ from genea.agent.core import build_agent  # noqa: E402
 from genea.index.embed import EmbeddingError  # noqa: E402
 from genea.index.embed import FakeEmbedder  # noqa: E402
 from genea.index.indexer import index_kb  # noqa: E402
+from genea.kb import KnowledgeBase  # noqa: E402
 from genea.index.progress import IndexLock, IndexProgress, now_iso, write_progress  # noqa: E402
 from genea.mcp_server import IndexGate, build_server  # noqa: E402
 from genea.tool_runner import run_tool  # noqa: E402
@@ -59,6 +60,20 @@ def test_tool_payload_matches_direct_call(tools, name, arguments, fn, positional
     result = _call(build_server(tools), name, arguments)
     assert result.is_error is False
     assert result.content[0].text == run_tool(tools, fn, *positional).text
+
+
+def _with_limits(tools, **limits):
+    return replace(tools, kb=KnowledgeBase(tools.kb.root, replace(tools.kb.settings, **limits)))
+
+
+def test_mcp_results_use_the_mcp_limit_not_the_agent_limit(tools):
+    args = {"query": "Josef", "k": 20, "per_file": 5}
+    wide = _with_limits(tools, tool_output_chars=300, mcp_output_chars=40000)
+    out = _text(_call(build_server(wide), "search_documents", args))
+    assert len(out) > 300 and '"truncated":true' not in out
+    assert out == run_tool(_with_limits(tools, tool_output_chars=40000), search.search_documents, "Josef", 20, 5).text
+    narrow = _with_limits(tools, tool_output_chars=40000, mcp_output_chars=300)
+    assert len(_text(_call(build_server(narrow), "search_documents", args))) <= 300 + 40
 
 
 def test_descriptions_match_the_agent_tools(tools):
