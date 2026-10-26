@@ -69,7 +69,8 @@ def lookup(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str) -> FileRow | N
 def _render_page(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str,
                  params: dict[str, list[str]]) -> bytes:
     from genea.viewer import pages
-    return pages.render(kb, conn, rel, params)
+    first = {key: values[0] for key, values in params.items() if values}
+    return pages.render(kb, conn, rel, first).encode("utf-8")
 
 
 def make_handler(kb: KnowledgeBase, hosts_of) -> type[BaseHTTPRequestHandler]:

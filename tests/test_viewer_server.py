@@ -67,7 +67,8 @@ def test_raw_serves_indexed_file(viewer, kb):
 
 def test_view_page_for_known_file(viewer):
     status, body, _ = get(viewer.url + "/v/docs/kronika.txt")
-    assert (status, body) == (200, b"viewer")
+    assert status == 200
+    assert "Josef Novák".encode() in body
 
 
 def test_unindexed_and_hidden_files_are_404(viewer, kb):
