@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from genea.analysis.models import Analysis, ScopeSpec
 from genea.kb import KnowledgeBase
 from genea.tools.base import ToolError
+from genea.viewer.links import STORED
 
 NAME_RE = re.compile(r"[\w.-]+")
 
@@ -65,7 +66,7 @@ def load(kb: KnowledgeBase, name: str) -> Analysis:
 
 def save(kb: KnowledgeBase, analysis: Analysis) -> Path:
     path = analysis_dir(kb, analysis.name) / "analysis.json"
-    write_atomic(path, analysis.model_dump_json(indent=2))
+    write_atomic(path, analysis.model_dump_json(indent=2, context=STORED))
     return path
 
 

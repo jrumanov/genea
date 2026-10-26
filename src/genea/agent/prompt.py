@@ -51,5 +51,9 @@ _DNA_RULE = """{n}. dna_summary, haplogroups and snp_lookup read results compute
    purpose: look up only what the user asks about and never try to reconstruct the genotype.
 """
 
+_LINK_RULE = """{n}. When a source, hit or mention has a `link`, write its citation as a markdown link with the usual citation
+   text, like [docs/matrika.pdf p.3](link). Copy links exactly; never build or change one.
+"""
+
 SYSTEM_PROMPT = _HEAD + _AGENT_RULE_4 + _TAIL + _SUMMARY_RULE.format(n=6) + _DNA_RULE.format(n=7)
-MCP_INSTRUCTIONS = _HEAD + _MCP_RULE_4 + _TAIL + _MCP_RULE_6 + _SUMMARY_RULE.format(n=7) + _DNA_RULE.format(n=8)
+MCP_INSTRUCTIONS = _HEAD + _MCP_RULE_4 + _TAIL + _MCP_RULE_6 + _SUMMARY_RULE.format(n=7) + _DNA_RULE.format(n=8) + _LINK_RULE.format(n=9)

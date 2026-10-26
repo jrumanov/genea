@@ -26,9 +26,9 @@ class SourceRef(BaseModel):
         return build_link(self.file, line=self.line, page=self.page, chunk=self.chunk, start_s=self.start_s)
 
     @model_serializer(mode="wrap")
-    def _drop_empty_link(self, handler):
+    def _drop_empty_link(self, handler, info):
         data = handler(self)
-        if data.get("link") is None:
+        if data.get("link") is None or (info.context or {}).get("strip_links"):
             data.pop("link", None)  # no viewer running: output stays as before
         return data
 
@@ -121,6 +121,7 @@ class DocHit(BaseModel):
     end_s: float | None = Field(default=None, exclude=True)
     kind: str = "text"
     chunk: int
+    link: str | None = None
     text: str
     score: float = Field(exclude=True)
     source: SourceRef = Field(exclude=True)  # the result's `sources` carries it once
@@ -136,6 +137,8 @@ class DocHit(BaseModel):
             data.pop("also", None)
         if not data.get("cut"):
             data.pop("cut", None)
+        if data.get("link") is None:
+            data.pop("link", None)
         return data
 
 
@@ -152,6 +155,14 @@ class Mention(BaseModel):
     chunk: int
     start_s: float | None = None
     snippet: str
+    link: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _compact(self, handler):
+        data = handler(self)
+        if data.get("link") is None:
+            data.pop("link", None)
+        return data
 
 
 class DocumentMentions(BaseModel):

@@ -21,6 +21,8 @@ from genea.kb import KnowledgeBase
 from genea.tool_runner import run_kb_tool, run_tool
 from genea.tools import conflicts, mentions, people, search
 from genea.tools.base import ToolContext
+from genea.viewer import links
+from genea.viewer.server import start_viewer
 
 
 class IndexGate:
@@ -233,6 +235,15 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
     return server
 
 
-def serve(gate: IndexGate) -> None:
-    """Serve on stdio until the client disconnects."""
-    build_server(gate).run("stdio")
+def serve(gate: IndexGate, announce: Callable[[str], None] | None = None) -> None:
+    """Serve on stdio until the client disconnects. The citation viewer runs meanwhile, and only then do
+    tool results carry links."""
+    handle = start_viewer(gate.kb, gate.kb.settings.viewer_port)
+    links.set_base_url(handle.url)
+    try:
+        if announce is not None:
+            announce(handle.url)
+        build_server(gate).run("stdio")
+    finally:
+        links.set_base_url(None)
+        handle.close()

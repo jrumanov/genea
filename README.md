@@ -67,6 +67,16 @@ did not finish, results carry a note that they may be incomplete. Ask Claude for
 run `genea status`, to see the progress. On Windows, `genea index --rebuild` cannot delete an index that
 Claude has open: close the Claude client first.
 
+### Clickable citations
+
+While `genea mcp` runs it also serves a read-only viewer on `127.0.0.1` (port `viewer_port`, default 8765; a free
+port is used if that one is taken, and the startup line on stderr shows the address). Tool results then carry a
+`link` for each source, hit and mention, and Claude writes citations as markdown links like
+`[docs/matrika.pdf p.3](http://127.0.0.1:8765/v/...)`. A link opens the PDF page, text or transcript passage, GEDCOM
+line or photo in your browser. The viewer serves only indexed files of the knowledge base, never `.genea`, and
+never ID cards, travel cards, resident permits, driving licences or health insurance cards. Links work only while
+the MCP server runs; stored analyses and proposals never contain them.
+
 ## Quick start
 
 ```powershell

@@ -6,6 +6,9 @@ from urllib.parse import quote, urlencode
 
 _base_url: str | None = None
 
+# Serialization context for anything written to disk: a stored link would keep a stale port.
+STORED = {"strip_links": True}
+
 
 def set_base_url(url: str | None) -> None:
     global _base_url
