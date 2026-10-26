@@ -52,6 +52,9 @@ def render(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: dict[s
     if row is None:
         return notice("Not found", "This file is not available in the viewer.")
     if row["kind"] == "doc":
+        if Path(rel).suffix.lower() == ".pdf":
+            from genea.viewer import pdfview
+            return pdfview.render_pdf(kb, conn, rel, params)
         if Path(rel).suffix.lower() == ".txt":
             page = textview.render_transcript(kb, conn, rel, params)
             if page is not None:
@@ -60,4 +63,7 @@ def render(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: dict[s
     if row["kind"] == "ged":
         from genea.viewer import gedview
         return gedview.render_ged(kb, rel, params)
+    if row["kind"] == "image":
+        from genea.viewer import photoview
+        return photoview.render_photo(kb, conn, rel)
     return notice("Not supported yet", "This kind of file has no viewer page yet.")
