@@ -13,14 +13,30 @@ from genea.viewer import pages
 CHANGED = "The file changed since it was indexed; showing it without highlighting"
 
 
-def mark_chunk(page_text: str, chunk_text: str) -> str | None:
-    """Escaped `page_text` (stripped, as indexed) with the chunk in <mark id="hit">; None if not found."""
+def span_from_params(params: dict[str, str], length: int) -> tuple[int, int] | None:
+    """`(start, end)` inside a chunk of `length` chars from `?o=` (start) and `?n=` (length); None if unusable."""
+    start, size = pages.int_param(params, "o"), pages.int_param(params, "n")
+    if start is None or size is None or size < 1 or start + size > length:
+        return None
+    return start, start + size
+
+
+def mark_chunk(page_text: str, chunk_text: str, span: tuple[int, int] | None = None) -> str | None:
+    """Escaped `page_text` (stripped, as indexed) with the chunk marked; None if not found.
+
+    Without `span` the chunk is `<mark id="hit">`; with one (offsets in the chunk) the chunk is the light
+    `<mark class="chunk">` and the span inside it the scrolled-to `<mark id="hit">`."""
     text = page_text.strip()
     at = text.find(chunk_text) if chunk_text else -1
     if at < 0:
         return None
     end = at + len(chunk_text)
-    return (html.escape(text[:at]) + '<mark id="hit">' + html.escape(text[at:end])
+    if span is None:
+        return (html.escape(text[:at]) + '<mark id="hit">' + html.escape(text[at:end])
+                + "</mark>" + html.escape(text[end:]))
+    s, e = at + span[0], at + span[1]
+    return (html.escape(text[:at]) + '<mark class="chunk">' + html.escape(text[at:s])
+            + '<mark id="hit">' + html.escape(text[s:e]) + "</mark>" + html.escape(text[e:end])
             + "</mark>" + html.escape(text[end:]))
 
 
@@ -54,7 +70,7 @@ def render_text(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: d
             continue
         body = None
         if chunk is not None and not marked and chunk["page"] == page.number:
-            body = mark_chunk(page.text, chunk["text"])
+            body = mark_chunk(page.text, chunk["text"], span_from_params(params, len(chunk["text"])))
             marked = body is not None
         if body is None:
             body = html.escape(page.text.strip())

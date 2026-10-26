@@ -32,7 +32,8 @@ def render_pdf(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: di
             continue
         body = None
         if chunk is not None and not marked and chunk["page"] == page.number:
-            body = textview.mark_chunk(page.text, chunk["text"])
+            body = textview.mark_chunk(
+                page.text, chunk["text"], textview.span_from_params(params, len(chunk["text"])))
             marked = body is not None
         if body is None:
             body = html.escape(page.text.strip())

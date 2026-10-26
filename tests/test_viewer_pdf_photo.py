@@ -63,6 +63,19 @@ def test_pdf_chunk_is_marked_in_page_text(kb, start):
     assert "1875 pokrten" not in body  # page 2 is not shown
 
 
+def test_pdf_span_marks_sentence_inside_chunk(kb, start):
+    url = start()
+    conn = sqlite3.connect(kb.index_path)
+    text = conn.execute("SELECT c.text FROM chunks c JOIN files f ON f.id = c.file_id "
+                        "WHERE f.path = 'docs/matrika.pdf' AND c.chunk_no = 0").fetchone()[0]
+    conn.close()
+    status, body = get(f"{url}/v/docs/matrika.pdf?page=1&chunk=0&o=1&n=4")
+    assert status == 200
+    assert 'class="chunk"' in body and f'<mark id="hit">{text[1:5]}</mark>' in body
+    status, body = get(f"{url}/v/docs/matrika.pdf?page=1&chunk=0&o=abc&n=4")
+    assert status == 200 and body.count('id="hit"') == 1 and 'class="chunk"' not in body
+
+
 def test_scanned_pdf_has_note_and_no_mark(kb, start):
     url = start()
     status, body = get(url + "/v/docs/sken.pdf")
