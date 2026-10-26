@@ -46,3 +46,10 @@ def test_dna_rule_in_both():
         assert "[dna/tree.ged-I12/haplogroups.json]" in prompt and "reconstruct the genotype" in prompt
     assert "\n7. dna_summary" in SYSTEM_PROMPT
     assert "\n8. dna_summary" in MCP_INSTRUCTIONS
+
+
+def test_mcp_instructions_include_link_rule_and_agent_prompt_does_not():
+    assert "\n9. When a source, hit or mention has a `link`" in MCP_INSTRUCTIONS
+    assert "[docs/matrika.pdf p.3](link)" in MCP_INSTRUCTIONS
+    assert "never build or change one" in MCP_INSTRUCTIONS
+    assert "`link`" not in SYSTEM_PROMPT

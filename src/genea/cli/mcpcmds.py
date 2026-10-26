@@ -36,6 +36,6 @@ def mcp_serve(ctx: typer.Context) -> None:
             # Rich wraps at 80 columns; `will be sent` stays on the first line, where the test looks for it.
             err.print("[yellow]Note: tool results (your family-tree data) will be sent to the connected "
                       "Claude client. (set privacy_notice = false to hide this)[/yellow]")
-        serve(gate)
+        serve(gate, lambda url: err.print(f"Citation viewer: {escape(url)} (links in Claude's answers open here)"))
     finally:
         common.console = stdout_console

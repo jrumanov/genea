@@ -10,6 +10,7 @@ from genea.text import normalize, snippet
 from genea.tools.base import ToolContext, ToolError, parse_person_id
 from genea.tools.models import DocumentMentions, Mention, PersonDocuments, SourceRef
 from genea.tools.people import summary
+from genea.viewer.links import build_link
 
 FILES_PER_PAGE = 6
 MENTIONS_PER_FILE = 3
@@ -82,6 +83,7 @@ def documents_about(ctx: ToolContext, person_id: str, page: int = 1) -> PersonDo
             # centre on the forms that gave this chunk its confidence, so a stronger mention wins
             needles = [form for form, conf in forms.items() if conf >= r["confidence"]]
             mentions.append(Mention(page=r["page"], chunk=r["chunk_no"], start_s=r["start_s"],
+                                    link=build_link(path, page=r["page"], chunk=r["chunk_no"], start_s=r["start_s"]),
                                     snippet=snippet(r["text"], needles, SNIPPET_CHARS)))
         first = mentions[0]
         files.append(DocumentMentions(

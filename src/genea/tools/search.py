@@ -13,6 +13,7 @@ from genea.ingest.transcript import Segment, format_time
 from genea.text import PREFIX_MIN, normalize, snippet
 from genea.tools.family import family_key
 from genea.tools.base import ToolContext, ToolError, parse_person_id
+from genea.viewer.links import build_link
 from genea.tools.models import DocHit, DocumentText, ImageOut, ImageResult, SearchResult, SourceRef
 
 RRF_K = 60
@@ -72,8 +73,12 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
             "JOIN files f ON f.id = c.file_id WHERE c.id = ?", (chunk_id,)).fetchone()
         shown = snippet(row["text"], needles, width)
         text, fitted = _fit(shown, width)
-        source = SourceRef(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"])
+        # the hit carries the link; the result's `sources` repeat the citation without it
+        source = SourceRef(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"],
+                           linked=False)
+        link = build_link(row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"])
         hits.append(DocHit(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"],
+                           link=link,
                            end_s=row["end_s"], kind=row["kind"], text=text, cut=fitted or shown != row["text"],
                            score=round(score, 4), source=source))
     first_chunk = {}

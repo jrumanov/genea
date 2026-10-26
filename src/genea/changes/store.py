@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 from genea.ingest.images import IMAGE_EXTS, sidecar_for
 from genea.kb import KnowledgeBase
 from genea.tools.models import SourceRef
+from genea.viewer.links import STORED
 
 STATUSES = ("pending", "applied", "rejected", "stale")
 STATE_PRECEDENCE = ("rejected", "applied", "stale", "pending")  # latest state first
@@ -135,7 +136,7 @@ class ChangeStore:
     def _write(self, change: Change) -> None:
         path = self._path(change.status, change.id)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(change.model_dump_json(indent=2), encoding="utf-8")
+        tmp.write_text(change.model_dump_json(indent=2, context=STORED), encoding="utf-8")
         os.replace(tmp, path)
 
     @staticmethod

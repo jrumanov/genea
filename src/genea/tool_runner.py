@@ -28,7 +28,7 @@ def cut_strings(value: Any, cap: int) -> Any:
     if isinstance(value, list):
         return [cut_strings(v, cap) for v in value]
     if isinstance(value, dict):
-        return {k: cut_strings(v, cap) for k, v in value.items()}
+        return {k: (v if k == "link" else cut_strings(v, cap)) for k, v in value.items()}  # a cut link is a dead link
     return value
 
 

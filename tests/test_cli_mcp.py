@@ -113,3 +113,21 @@ def test_stdio_server_end_to_end(sample_root, tmp_path):
     assert bad_args.is_error is True            # invalid arguments are an error, not a crash...
     assert again.is_error is False              # ...and the server keeps serving afterwards
     assert "will be sent" in stderr_path.read_text(encoding="utf-8")  # privacy notice goes to stderr
+
+
+def test_mcp_announces_the_viewer_on_stderr(sample_root, tmp_path):
+    pytest.importorskip("mcp")
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client
+
+    _prepare(sample_root)
+    stderr_path = tmp_path / "server-stderr.txt"
+
+    async def session_run():
+        with stderr_path.open("w", encoding="utf-8") as errlog:
+            async with stdio_client(_params(sample_root), errlog=errlog) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+
+    asyncio.run(session_run())
+    assert "http://127.0.0.1:" in stderr_path.read_text(encoding="utf-8")
