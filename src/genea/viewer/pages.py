@@ -57,4 +57,7 @@ def render(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: dict[s
             if page is not None:
                 return page
         return textview.render_text(kb, conn, rel, params)
+    if row["kind"] == "ged":
+        from genea.viewer import gedview
+        return gedview.render_ged(kb, rel, params)
     return notice("Not supported yet", "This kind of file has no viewer page yet.")
