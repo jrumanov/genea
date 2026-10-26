@@ -10,9 +10,9 @@ from urllib.parse import quote
 from genea.kb import KnowledgeBase
 
 STYLE = """
-:root { --bg: #fdfcf9; --fg: #222; --muted: #666; --mark: #ffe58a; --note: #fff3cd; --rule: #ddd; }
+:root { --bg: #fdfcf9; --fg: #222; --muted: #666; --mark: #ffd33d; --chunk: #fff3c4; --note: #fff3cd; --rule: #ddd; }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #1b1b1d; --fg: #e4e4e4; --muted: #999; --mark: #6b5a00; --note: #3d3410; --rule: #444; }
+  :root { --bg: #1b1b1d; --fg: #e4e4e4; --muted: #999; --mark: #8a7400; --chunk: #3d3410; --note: #3d3410; --rule: #444; }
 }
 body { background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, sans-serif;
        max-width: 46rem; margin: 0 auto; padding: 1rem; }
@@ -20,6 +20,8 @@ h1 { font-size: 1.1rem; word-break: break-all; }
 a { color: inherit; }
 pre { white-space: pre-wrap; word-wrap: break-word; font: inherit; }
 mark { background: var(--mark); color: inherit; }
+mark.chunk { background: var(--chunk); }
+mark.chunk mark#hit { background: var(--mark); }
 .note { background: var(--note); padding: .5rem .75rem; border-radius: 4px; }
 .page { border-top: 1px solid var(--rule); margin-top: 1rem; padding-top: .5rem; }
 .page h2 { font-size: .9rem; color: var(--muted); }

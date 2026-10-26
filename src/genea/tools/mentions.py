@@ -6,7 +6,7 @@ import json
 import math
 
 from genea.index.indexer import EXACT, VARIANT, name_forms
-from genea.text import normalize, snippet
+from genea.text import match_span, normalize, snippet
 from genea.tools.base import ToolContext, ToolError, parse_person_id
 from genea.tools.models import DocumentMentions, Mention, PersonDocuments, SourceRef
 from genea.tools.people import summary
@@ -82,8 +82,10 @@ def documents_about(ctx: ToolContext, person_id: str, page: int = 1) -> PersonDo
         for r in chunks[:MENTIONS_PER_FILE]:
             # centre on the forms that gave this chunk its confidence, so a stronger mention wins
             needles = [form for form, conf in forms.items() if conf >= r["confidence"]]
-            mentions.append(Mention(page=r["page"], chunk=r["chunk_no"], start_s=r["start_s"],
-                                    link=build_link(path, page=r["page"], chunk=r["chunk_no"], start_s=r["start_s"]),
+            found = match_span(r["text"], needles)
+            link = build_link(path, page=r["page"], chunk=r["chunk_no"], start_s=r["start_s"],
+                              span=(found[0], found[1] - found[0]) if found else None)
+            mentions.append(Mention(page=r["page"], chunk=r["chunk_no"], start_s=r["start_s"], link=link,
                                     snippet=snippet(r["text"], needles, SNIPPET_CHARS)))
         first = mentions[0]
         files.append(DocumentMentions(

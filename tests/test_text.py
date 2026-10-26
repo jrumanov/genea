@@ -66,3 +66,51 @@ def test_snippet_ties_prefer_longer_needles():
 def test_snippet_short_needles_stay_whole_words():
     from genea.text import snippet
     assert snippet("Janasik " * 50 + "pan Jan.", ["jan"], 20).endswith("pan Jan.")  # not the first Janasik
+
+
+def test_match_span_returns_the_sentence_around_the_match():
+    from genea.text import match_span
+    text = "Prvy vyrok. Tu zil Simon v Brne! Treti vyrok."
+    s, e = match_span(text, ["simon"])
+    assert text[s:e] == "Tu zil Simon v Brne!"
+
+
+def test_match_span_is_accent_insensitive():
+    from genea.text import match_span
+    text = "Ahoj. Šimon prišiel domov. Koniec."
+    s, e = match_span(text, ["simon"])
+    assert text[s:e] == "Šimon prišiel domov."
+
+
+def test_match_span_first_match_wins():
+    from genea.text import match_span
+    text = "Jan prisiel. Potom odisiel Jan."
+    s, e = match_span(text, ["jan"])
+    assert text[s:e] == "Jan prisiel."
+
+
+def test_match_span_stops_at_blank_line():
+    from genea.text import match_span
+    text = "Nadpis bez bodky\n\nFabik bol tu\nna dvore\n\nDalsi odstavec"
+    s, e = match_span(text, ["fabik"])
+    assert text[s:e] == "Fabik bol tu\nna dvore"
+
+
+def test_match_span_cuts_a_long_sentence_to_a_window():
+    from genea.text import match_span, normalize
+    text = "slovo " * 200 + "Fabik " + "slovo " * 200
+    s, e = match_span(text, ["fabik"])
+    assert e - s <= 400
+    assert "fabik" in normalize(text[s:e])
+
+
+def test_match_span_without_match_is_none():
+    from genea.text import match_span
+    assert match_span("Nic tu nie je.", ["fabik"]) is None
+
+
+def test_match_span_slice_contains_the_needle():
+    from genea.text import match_span, normalize
+    text = "Raz. Dvořáková bola doma? Nie."
+    s, e = match_span(text, ["dvorakova"])
+    assert "dvorakova" in normalize(text[s:e])

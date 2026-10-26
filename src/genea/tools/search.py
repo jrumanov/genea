@@ -10,7 +10,7 @@ import sqlite_vec
 from genea.index.embed import EmbeddingError
 from genea.ingest.docs import DOC_EXTS, extract_document
 from genea.ingest.transcript import Segment, format_time
-from genea.text import PREFIX_MIN, normalize, snippet
+from genea.text import PREFIX_MIN, match_span, normalize, snippet
 from genea.tools.family import family_key
 from genea.tools.base import ToolContext, ToolError, parse_person_id
 from genea.viewer.links import build_link
@@ -76,7 +76,9 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
         # the hit carries the link; the result's `sources` repeat the citation without it
         source = SourceRef(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"],
                            linked=False)
-        link = build_link(row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"])
+        found = match_span(row["text"], needles)
+        link = build_link(row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"],
+                          span=(found[0], found[1] - found[0]) if found else None)
         hits.append(DocHit(file=row["path"], page=row["page"], chunk=row["chunk_no"], start_s=row["start_s"],
                            link=link,
                            end_s=row["end_s"], kind=row["kind"], text=text, cut=fitted or shown != row["text"],

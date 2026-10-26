@@ -48,6 +48,54 @@ def test_documents_about_mentions_have_links(tools, no_base_url):
             assert mention["link"].startswith(BASE) and f"chunk={mention['chunk']}" in mention["link"]
 
 
+def _span_of(link: str) -> tuple[int, int] | None:
+    from urllib.parse import parse_qs, urlparse
+
+    query = parse_qs(urlparse(link).query)
+    return (int(query["o"][0]), int(query["n"][0])) if "o" in query else None
+
+
+def _chunk_text(tools, file: str, chunk: int) -> str:
+    return tools.conn.execute(
+        "SELECT c.text FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.path = ? AND c.chunk_no = ?",
+        (file, chunk)).fetchone()["text"]
+
+
+def test_search_hit_link_carries_the_matched_sentence(tools, no_base_url):
+    from genea.text import normalize
+
+    links.set_base_url(BASE)
+    data = _json(search.search_documents(tools, "Josef"))
+    spans = 0
+    for hit in data["hits"]:
+        span = _span_of(hit["link"])
+        if span is None:
+            continue
+        spans += 1
+        sentence = _chunk_text(tools, hit["file"], hit["chunk"])[span[0]:span[0] + span[1]]
+        assert sentence and "josef" in normalize(sentence)
+    assert spans
+
+
+def test_search_hit_without_word_match_has_no_span(tools, no_base_url):
+    links.set_base_url(BASE)
+    data = _json(search.search_documents(tools, "zzzqqq xylophone"))
+    assert all(_span_of(hit["link"]) is None for hit in data["hits"])
+
+
+def test_mention_link_carries_the_matched_sentence(tools, no_base_url):
+    links.set_base_url(BASE)
+    data = _json(mentions.documents_about(tools, JAN))
+    spans = 0
+    for entry in data["files"]:
+        for mention in entry["mentions"]:
+            span = _span_of(mention["link"])
+            if span is not None:
+                spans += 1
+                assert _chunk_text(tools, entry["file"], mention["chunk"])[span[0]:span[0] + span[1]].strip()
+    assert spans
+
+
 def test_get_person_event_sources_have_links(tools, no_base_url):
     links.set_base_url(BASE)
     data = _json(people.get_person(tools, JAN))

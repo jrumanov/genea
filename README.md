@@ -73,7 +73,9 @@ While `genea mcp` runs it also serves a read-only viewer on `127.0.0.1` (port `v
 port is used if that one is taken, and the startup line on stderr shows the address). Tool results then carry a
 `link` for each source, hit and mention, and Claude writes citations as markdown links like
 `[docs/matrika.pdf p.3](http://127.0.0.1:8765/v/...)`. A link opens the PDF page, text or transcript passage, GEDCOM
-line or photo in your browser. The viewer serves only indexed files of the knowledge base, never `.genea`, and
+line or photo in your browser. In text and PDF pages the whole cited passage gets a light highlight and the matched
+sentence inside it a strong one, scrolled into view (links carry its position as `o` and `n`; unusable values fall
+back to the passage highlight). The viewer serves only indexed files of the knowledge base, never `.genea`, and
 never ID cards, travel cards, resident permits, driving licences or health insurance cards. Links work only while
 the MCP server runs; stored analyses and proposals never contain them.
 

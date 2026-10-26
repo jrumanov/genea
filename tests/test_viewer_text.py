@@ -9,7 +9,7 @@ from fixtures.transcripts import NAME, write_transcript
 from genea.index.embed import FakeEmbedder
 from genea.index.indexer import index_kb
 from genea.viewer.server import start_viewer
-from genea.viewer.textview import mark_chunk
+from genea.viewer.textview import mark_chunk, span_from_params
 
 
 def get(url):
@@ -122,3 +122,39 @@ def test_page_param_on_text_doc_without_pages_is_ignored(kb, start):
     status, body = get(url + "/v/docs/poznamky.md?page=7&chunk=0")
     assert status == 200
     assert "Terezie Dvořáková" in body and '<mark id="hit">' in body
+
+
+def sentence_kb(kb):
+    text = "Úvodná veta o Šimonovi. Terezie Dvořáková <zomrela> v Brne & tu. Posledná veta."
+    (kb.root / "docs" / "poznamky.md").write_text(text + "\n", encoding="utf-8")
+    return text
+
+
+def test_span_marks_exactly_the_sentence_inside_chunk_mark(kb, start):
+    text = sentence_kb(kb)
+    url = start()
+    chunk = chunk_row(kb, "docs/poznamky.md", 0)[0]
+    o = chunk.index("Terezie")
+    n = len("Terezie Dvořáková <zomrela> v Brne & tu.")
+    status, body = get(f"{url}/v/docs/poznamky.md?chunk=0&o={o}&n={n}")
+    assert status == 200
+    assert body.count('id="hit"') == 1 and 'class="chunk"' in body
+    assert '<mark id="hit">Terezie Dvořáková &lt;zomrela&gt; v Brne &amp; tu.</mark>' in body
+    assert body.index('class="chunk"') < body.index('id="hit"')
+    assert text.startswith("Úvodná") and "Úvodná veta o Šimonovi." in body
+
+
+@pytest.mark.parametrize("query", ["o=-1&n=5", "o=abc&n=5", "o=999999&n=5", "o=2&n=999999", "o=2&n=0", "o=2", "n=5"])
+def test_bad_span_falls_back_to_chunk_mark(kb, start, query):
+    sentence_kb(kb)
+    url = start()
+    status, body = get(f"{url}/v/docs/poznamky.md?chunk=0&{query}")
+    assert status == 200 and body.count('id="hit"') == 1
+    assert "changed since" not in body
+
+
+def test_span_from_params_helper():
+    assert span_from_params({"o": "10", "n": "20"}, 100) == (10, 30)
+    assert span_from_params({"o": "10", "n": "20"}, 29) is None
+    assert span_from_params({"o": "-1", "n": "2"}, 29) is None
+    assert span_from_params({}, 29) is None
