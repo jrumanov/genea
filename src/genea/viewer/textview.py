@@ -75,7 +75,8 @@ def render_transcript(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str,
         return None
     chunk = find_chunk(conn, rel, params)
     hit: set[int] = set()
-    if chunk is not None and chunk["kind"] != "summary":  # summaries say where to look, never evidence
+    timed = chunk is not None and chunk["start_s"] is not None and chunk["end_s"] is not None
+    if timed and chunk["kind"] != "summary":  # summaries say where to look, never evidence
         eps = 1e-6
         hit = {i for i, s in enumerate(segments)
                if s.start >= chunk["start_s"] - eps and s.end <= chunk["end_s"] + eps}

@@ -42,17 +42,27 @@ def notice_page(title: str, message_html: str) -> bytes:
             f"<h1>{html.escape(title)}</h1><p>{message_html}</p>").encode("utf-8")
 
 
+def _plain_rel(rel: str) -> bool:
+    if not rel or rel[0] in "/\\" or "\\" in rel or ":" in rel:
+        return False
+    return ".." not in rel.split("/")
+
+
 def lookup(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str) -> FileRow | None:
     """The indexed, readable, non-excluded file at this KB-relative path, else None."""
+    # Links are built from DB paths, so the exact string must be a row before any filesystem access
+    # (a UNC-looking path would make Windows contact a remote share).
+    if not _plain_rel(rel):
+        return None
+    row = conn.execute("SELECT id, path, kind, status FROM files WHERE path = ?", (rel,)).fetchone()
+    if row is None:
+        return None
     try:
-        path = kb.resolve_inside(rel)
+        if not kb.resolve_inside(row["path"]).is_file():
+            return None
     except (ValueError, OSError):
         return None
-    if not path.is_file():
-        return None
-    row = conn.execute("SELECT id, path, kind, status FROM files WHERE path = ?",
-                       (kb.rel(path),)).fetchone()
-    if row is None or not (row["status"] == "ok" or (row["status"] == "needs_ocr" and row["kind"] == "doc")):
+    if not (row["status"] == "ok" or (row["status"] == "needs_ocr" and row["kind"] == "doc")):
         return None
     file = FileRow(row["id"], row["path"], row["kind"], row["status"])
     if file.kind == "image":
@@ -113,9 +123,20 @@ def make_handler(kb: KnowledgeBase, hosts_of) -> type[BaseHTTPRequestHandler]:
 
         do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = _method_not_allowed  # noqa: N815
 
+        def _fetch_allowed(self) -> bool:
+            site = self.headers.get("Sec-Fetch-Site", "").lower()
+            if site in ("", "none", "same-origin"):
+                return True
+            return (urlsplit(self.path).path.startswith("/v/")
+                    and self.headers.get("Sec-Fetch-Mode", "").lower() == "navigate"
+                    and self.headers.get("Sec-Fetch-Dest", "").lower() == "document")
+
         def _get(self) -> None:
             if self.headers.get("Host", "") not in hosts_of():
                 self._send(403, notice_page("Forbidden", "Unexpected Host header."))
+                return
+            if not self._fetch_allowed():
+                self._send(403, notice_page("Forbidden", "Cross-site request."))
                 return
             parts = urlsplit(self.path)
             route, _, encoded = parts.path.lstrip("/").partition("/")
@@ -141,9 +162,13 @@ def make_handler(kb: KnowledgeBase, hosts_of) -> type[BaseHTTPRequestHandler]:
                     self._not_found()
                 elif route == "raw":
                     ctype = mimetypes.guess_type(file.path)[0] or "application/octet-stream"
+                    if ctype.startswith("text/"):
+                        ctype += "; charset=utf-8"
                     self._send(200, kb.resolve_inside(file.path).read_bytes(), ctype, inline=True)
                 else:
                     self._send(200, _render_page(kb, conn, file.path, parse_qs(parts.query)))
+            except sqlite3.Error:
+                self._send(503, notice_page("Index not ready", NO_INDEX))
             finally:
                 conn.close()
 
@@ -162,7 +187,7 @@ def start_viewer(kb: KnowledgeBase, port: int | None = None) -> ViewerHandle:
     handler = make_handler(kb, lambda: {f"127.0.0.1:{state['port']}", f"localhost:{state['port']}"})
     try:
         server = _Server(("127.0.0.1", wanted), handler)
-    except OSError:
+    except (OSError, OverflowError):  # port taken or out of range
         server = _Server(("127.0.0.1", 0), handler)
     state["port"] = server.server_address[1]
     threading.Thread(target=server.serve_forever, name="genea-viewer", daemon=True).start()

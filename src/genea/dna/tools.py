@@ -54,7 +54,7 @@ class SnpLookupResult(ToolResult):
 
 
 def _source(slug: str, name: str) -> SourceRef:
-    return SourceRef(file=f"dna/{slug}/{name}")
+    return SourceRef(file=f"dna/{slug}/{name}", linked=False)  # not served by the viewer
 
 
 def dna_summary(kb: KnowledgeBase, person: str) -> DnaSummary:
