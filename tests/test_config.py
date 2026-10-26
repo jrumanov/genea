@@ -72,3 +72,11 @@ def test_structure_model_is_off_by_default_and_can_be_set(isolated_home, tmp_pat
     (kb / ".genea").mkdir(parents=True)
     (kb / ".genea" / "config.toml").write_text('transcribe_structure_model = "base"\n', encoding="utf-8")
     assert load_settings(kb).transcribe_structure_model == "base"
+
+
+def test_viewer_port_setting(isolated_home, tmp_path):
+    assert load_settings(None).viewer_port == 8765
+    kb = tmp_path / "kb"
+    (kb / ".genea").mkdir(parents=True)
+    (kb / ".genea" / "config.toml").write_text("viewer_port = 9100\n", encoding="utf-8")
+    assert load_settings(kb).viewer_port == 9100

@@ -74,3 +74,11 @@ def actx(analysis_kb):
     ctx = open_tools(analysis_kb, FakeEmbedder())
     yield ctx
     ctx.conn.close()
+
+
+@pytest.fixture
+def no_base_url():
+    """Reset the citation viewer base URL after the test."""
+    from genea.viewer import links
+    yield
+    links.set_base_url(None)

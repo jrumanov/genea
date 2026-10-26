@@ -17,6 +17,7 @@ class Settings:
     max_tool_calls: int = 15
     tool_output_chars: int = 12000
     mcp_output_chars: int = 40000  # the same limit for the MCP server: Claude takes far more than a local model
+    viewer_port: int = 8765  # localhost port of the citation viewer started by genea mcp
     privacy_notice: bool = True
     log_prompts: bool = True
     gedcom_direct_write: bool = False

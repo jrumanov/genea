@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, computed_field, model_serializer
 
 from genea.ingest.transcript import format_time
+from genea.viewer.links import build_link
 
 
 class SourceRef(BaseModel):
@@ -15,6 +16,21 @@ class SourceRef(BaseModel):
     page: int | None = None
     chunk: int | None = None
     start_s: float | None = None
+    linked: bool = Field(default=True, exclude=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def link(self) -> str | None:
+        if not self.linked:
+            return None
+        return build_link(self.file, line=self.line, page=self.page, chunk=self.chunk, start_s=self.start_s)
+
+    @model_serializer(mode="wrap")
+    def _drop_empty_link(self, handler):
+        data = handler(self)
+        if data.get("link") is None:
+            data.pop("link", None)  # no viewer running: output stays as before
+        return data
 
     def cite(self) -> str:
         if self.line is not None:
