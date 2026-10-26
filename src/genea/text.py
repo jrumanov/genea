@@ -37,6 +37,9 @@ def _normalize_with_map(text: str) -> tuple[str, list[int]]:
     return "".join(out), index
 
 
+_END = re.compile(r"[.?!]|\n[ \t\r]*\n")  # sentence end: punctuation or a blank line
+
+
 def _window(start: int, end: int, n: int, width: int) -> tuple[int, int]:
     """The `width`-character window of an n-character text centred on [start, end), minus one character at each cut
     end to make room for the "…"."""
@@ -50,14 +53,12 @@ def _window(start: int, end: int, n: int, width: int) -> tuple[int, int]:
     return lo, hi
 
 
-def snippet(text: str, needles: list[str], width: int) -> str:
-    """At most `width` characters of the original text around needle matches: the window, centred on one match, that
-    shows the most distinct needles; ties go to the longer needles (rarer words), then to the earliest window.
-    A needle starts at a word boundary; one of PREFIX_MIN+ characters may end inside a word (as a prefix), a shorter
-    one must end the word."""
+def _find_matches(text: str, needles: list[str]) -> list[tuple[int, int, str]]:
+    """All needle matches as (start, end, needle) in the original text, sorted. A needle starts at a word boundary;
+    one of PREFIX_MIN+ characters may end inside a word (as a prefix), a shorter one must end the word."""
     norm, index = _normalize_with_map(text)
     n = len(text)
-    matches: list[tuple[int, int, str]] = []  # (start, end) in the original text, needle
+    matches: list[tuple[int, int, str]] = []
     for needle in dict.fromkeys(needles):
         if not needle:
             continue
@@ -68,9 +69,41 @@ def snippet(text: str, needles: list[str], width: int) -> str:
             while end < n and unicodedata.combining(text[end]):
                 end += 1
             matches.append((start, end, needle))
+    matches.sort()
+    return matches
+
+
+def match_span(text: str, needles: list[str], max_chars: int = 400) -> tuple[int, int] | None:
+    """(start, end) in `text` of the sentence (ended by . ? ! or a blank line) holding the first needle match, matched
+    like `snippet`; a longer sentence is cut to a `max_chars` window around the match. None when nothing matches."""
+    matches = _find_matches(text, needles)
+    if not matches:
+        return None
+    mstart, mend, _ = matches[0]
+    n = len(text)
+    lo = 0
+    for m in _END.finditer(text, 0, mstart):
+        lo = m.end()
+    nxt = _END.search(text, mend)
+    hi = nxt.end() if nxt and text[nxt.start()] in ".?!" else (nxt.start() if nxt else n)
+    while lo < hi and text[lo].isspace():
+        lo += 1
+    while hi > lo and text[hi - 1].isspace():
+        hi -= 1
+    if hi - lo > max_chars:
+        lo2 = max(lo, min((mstart + mend) // 2 - max_chars // 2, hi - max_chars))
+        lo, hi = lo2, lo2 + max_chars
+    return lo, hi
+
+
+def snippet(text: str, needles: list[str], width: int) -> str:
+    """At most `width` characters of the original text around needle matches: the window, centred on one match, that
+    shows the most distinct needles; ties go to the longer needles (rarer words), then to the earliest window.
+    Matching rules: see `_find_matches`."""
+    n = len(text)
+    matches = _find_matches(text, needles)
     if not matches:
         return text if n <= width else text[:max(width - 1, 0)] + "…"
-    matches.sort()
     starts = [s for s, _, _ in matches]
     best: tuple[int, int, int] | None = None  # (distinct needles, their total length, -lo)
     best_window = (0, 0)
