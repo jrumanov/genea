@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
@@ -79,6 +80,11 @@ def status_text(summary: IndexSummary) -> str:
     return "\n".join(lines)
 
 
+def mcp_budget(kb: KnowledgeBase) -> KnowledgeBase:
+    """The knowledge base with the MCP output limit as its tool_output_chars (every tool and the runner read that)."""
+    return KnowledgeBase(kb.root, replace(kb.settings, tool_output_chars=kb.settings.mcp_output_chars))
+
+
 def build_server(source: ToolContext | IndexGate) -> MCPServer:
     """Register the tools. The wrappers are `async def` on purpose: the SDK runs plain
     functions in worker threads, and the SQLite connection in the context belongs to the event-loop thread."""
@@ -87,7 +93,8 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
     server = MCPServer("genea", instructions=f"{MCP_INSTRUCTIONS}Index state when this session started: {startup}\n")
 
     def run(fn, *args) -> str:
-        out = run_tool(gate.context(), fn, *args)
+        ctx = gate.context()
+        out = run_tool(replace(ctx, kb=mcp_budget(ctx.kb)), fn, *args)
         if out.is_error:
             raise McpToolError(out.text)
         note = gate.note()
@@ -97,7 +104,7 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
 
     def run_dna(fn, *args) -> str:
         """DNA tools need no index: they answer before and while `genea index` runs."""
-        out = run_kb_tool(gate.kb, fn, *args)
+        out = run_kb_tool(mcp_budget(gate.kb), fn, *args)
         if out.is_error:
             raise McpToolError(out.text)
         return out.text
@@ -133,7 +140,7 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
 
     @server.tool(structured_output=False)
     async def search_documents(query: str, k: int = 8, per_file: int = 1) -> str:
-        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page (or, for recordings, the time in the recording). Returns one passage per file unless per_file is higher; more_files and more_chunks count candidate files and passages not returned (a lower bound, not all of them are matches)."""
+        """Search the text documents (letters, chronicles, registers, notes). Returns passages with file and page (or, for recordings, the time in the recording). Returns one passage per file unless per_file is higher; more_files and more_chunks count candidate files and passages not returned (a lower bound, not all of them are matches). A passage with cut=true is shortened: read_document shows the whole page or moment."""
         return run(search.search_documents, query, k, per_file)
 
     @server.tool(structured_output=False)

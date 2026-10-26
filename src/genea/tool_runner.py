@@ -35,7 +35,8 @@ def cut_strings(value: Any, cap: int) -> Any:
 def shrink(data: dict[str, Any], limit: int) -> str:
     """Fit a tool result into `limit` characters, always keeping `sources` (deduplicated).
 
-    The output stays valid JSON followed by TRUNCATION_MARKER (the only text allowed beyond `limit`).
+    The output stays valid JSON followed by TRUNCATION_MARKER (the only text allowed beyond `limit`), with
+    `cut_fields` naming the top-level fields that lost text or list items.
     Order of trimming: long strings, then list items, then everything but `sources`; at least one
     source is always kept, even if that alone exceeds a tiny limit.
     """
@@ -43,25 +44,34 @@ def shrink(data: dict[str, Any], limit: int) -> str:
     for src in data.get("sources", []):
         if src not in sources:
             sources.append(src)
-    data = {**data, "sources": sources, "truncated": True}
+    original = {**data, "sources": sources}
+    cut: list[str] = []
+
+    def mark(d: dict[str, Any]) -> dict[str, Any]:
+        for key, value in d.items():
+            if key not in cut and key != "sources" and value != original.get(key):
+                cut.append(key)
+        return {**d, "truncated": True, "cut_fields": list(cut)}
 
     def fits(d: dict[str, Any]) -> bool:
-        return len(dump(d)) <= limit
+        return len(dump(mark(d))) <= limit
 
+    data = original
     for cap in (2000, 500, 200, 80):
         data = cut_strings(data, cap)
         if fits(data):
-            return dump(data)
+            return dump(mark(data))
     lists = [k for k, v in data.items() if k != "sources" and isinstance(v, list)]
     for key in lists:
         while len(data[key]) > 1 and not fits(data):
             data[key] = data[key][: len(data[key]) // 2]
         if fits(data):
-            return dump(data)
-    data = {"sources": data["sources"], "truncated": True}
+            return dump(mark(data))
+    cut[:] = [k for k in original if k != "sources"]
+    data = {"sources": sources}
     while len(data["sources"]) > 1 and not fits(data):
         data["sources"] = data["sources"][: len(data["sources"]) // 2]
-    return dump(data)
+    return dump(mark(data))
 
 
 def render_limited(result: BaseModel, limit: int) -> str:

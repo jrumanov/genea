@@ -108,6 +108,7 @@ class DocHit(BaseModel):
     text: str
     score: float = Field(exclude=True)
     source: SourceRef = Field(exclude=True)  # the result's `sources` carries it once
+    cut: bool = False  # the passage is shortened: read_document shows the whole page or moment
     also: list[str] = Field(default_factory=list)  # other sides of the same document, e.g. harok_b for harok_a
 
     @model_serializer(mode="wrap")
@@ -117,6 +118,8 @@ class DocHit(BaseModel):
             data.pop("kind", None)
         if not data.get("also"):
             data.pop("also", None)
+        if not data.get("cut"):
+            data.pop("cut", None)
         return data
 
 

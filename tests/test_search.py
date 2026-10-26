@@ -7,6 +7,7 @@ from genea.index.indexer import index_kb
 from genea.kb import KnowledgeBase
 from genea.tool_runner import render
 from genea.tools.base import ToolError
+from genea.tools.models import SearchResult
 from genea.tools.search import find_images, read_document, search_documents
 
 
@@ -55,6 +56,15 @@ def test_default_search_fits_and_is_one_hit_per_file(tools):
     assert result.more_files >= 4
     out = render(tools, result)
     assert len(out) <= tools.kb.settings.tool_output_chars and '"truncated":true' not in out
+
+
+def test_search_marks_only_shortened_passages_as_cut(tools):
+    short = search_documents(tools, "Terezie Dvořáková Tišnov").hits[0]
+    assert short.cut is False and '"cut"' not in render(tools, SearchResult(query="q", hits=[short]))
+    _long_docs(tools)
+    result = search_documents(tools, "Jozef Fabik")
+    assert result.hits and all(h.cut for h in result.hits)
+    assert render(tools, result).count('"cut":true') == len(result.hits)
 
 
 def test_search_largest_request_still_fits(tools):
