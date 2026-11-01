@@ -56,10 +56,15 @@ def find_chunk(conn: sqlite3.Connection, rel: str, params: dict[str, str]) -> sq
 
 
 def render_text(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: dict[str, str]) -> str:
+    return pages.shell(rel, text_body(kb, conn, rel, params))
+
+
+def text_body(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: dict[str, str]) -> str:
+    """The page body (without the HTML shell) of a text document."""
     try:
         extract = extract_document(kb.resolve_inside(rel))
     except Exception as exc:
-        return pages.notice("Cannot read this file", f"{type(exc).__name__}: {exc}")
+        return pages.notice_body("Cannot read this file", f"{type(exc).__name__}: {exc}")
     chunk = find_chunk(conn, rel, params)
     wanted = pages.int_param(params, "page")
     if all(p.number != wanted for p in extract.pages):
@@ -77,7 +82,7 @@ def render_text(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: d
         label = f"<h2>Page {page.number}</h2>" if page.number is not None else ""
         parts.append(f'<div class="page">{label}<pre>{body}</pre></div>')
     note = chunk_note() if "chunk" in params and not marked else ""
-    return pages.shell(rel, pages.header(rel) + note + "".join(parts) + pages.SCROLL)
+    return pages.header(rel) + note + "".join(parts) + pages.SCROLL
 
 
 def render_transcript(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str,

@@ -432,3 +432,27 @@ def test_name_forms_gender_switch():
     assert dict(name_forms("Jan", "Černý", [], "M"))["jan cerna"] == 0.8
     assert dict(name_forms("Anna", "Fabiková", [], "F"))["anna fabik"] == 0.8
     assert dict(name_forms("Anna", "Novotská", [], "F"))["anna novotsky"] == 0.8
+
+
+def test_regions_are_indexed(kb_with_images, monkeypatch):
+    from genea.index import indexer
+    from genea.ingest.images import FaceRegion, ImageRecord
+
+    regions = [FaceRegion("Novak Jan", 0.1, 0.2, 0.3, 0.4), FaceRegion("Novakova Marie", 0.5, 0.25, 0.125, 0.5)]
+    monkeypatch.setattr(indexer, "extract_images",
+                        lambda paths, exe="exiftool": {p: ImageRecord(None, regions=list(regions) if i == 0 else [])
+                                                       for i, p in enumerate(paths)})
+    assert index_kb(kb_with_images, FakeEmbedder()).errors == 0
+    rows = _query(kb_with_images, "SELECT r.image_id, r.name, r.x, r.y, r.w, r.h, f.path FROM image_regions r "
+                                  "JOIN images i ON i.id = r.image_id JOIN files f ON f.id = i.file_id ORDER BY r.id")
+    assert [tuple(r)[1:6] for r in rows] == [("Novak Jan", 0.1, 0.2, 0.3, 0.4),
+                                             ("Novakova Marie", 0.5, 0.25, 0.125, 0.5)]
+    assert rows[0]["image_id"] == rows[1]["image_id"]
+    assert _query(kb_with_images, "SELECT COUNT(*) FROM images")[0][0] == 3
+    # re-indexing a changed file cascades the old rows away
+    conn = open_index(kb_with_images, FakeEmbedder())
+    try:
+        conn.execute("DELETE FROM files WHERE id = (SELECT file_id FROM images WHERE id = ?)", (rows[0]["image_id"],))
+        assert conn.execute("SELECT COUNT(*) FROM image_regions").fetchone()[0] == 0
+    finally:
+        conn.close()

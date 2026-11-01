@@ -518,6 +518,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "pillow" },
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["openai"] },
     { name = "pypdf", extra = ["fonts"] },
@@ -554,7 +555,6 @@ dev = [
     { name = "av" },
     { name = "mcp" },
     { name = "numpy" },
-    { name = "pillow" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "reportlab" },
@@ -570,6 +570,7 @@ requires-dist = [
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.3" },
     { name = "numpy", marker = "extra == 'convert'", specifier = ">=2" },
     { name = "numpy", marker = "extra == 'transcribe'", specifier = ">=2" },
+    { name = "pillow", specifier = ">=12.0" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-ai-slim", extras = ["anthropic"], marker = "extra == 'cloud'", specifier = ">=2.54" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.54" },
@@ -590,7 +591,6 @@ dev = [
     { name = "av", specifier = ">=14" },
     { name = "mcp", specifier = ">=2.3" },
     { name = "numpy", specifier = ">=2" },
-    { name = "pillow", specifier = ">=12.0" },
     { name = "pytest", specifier = ">=8.4" },
     { name = "pytest-xdist", specifier = ">=3.6" },
     { name = "reportlab", specifier = ">=5.0" },

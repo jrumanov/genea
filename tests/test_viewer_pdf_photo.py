@@ -106,11 +106,11 @@ def test_photo_shows_metadata_escaped(kb, start):
     assert get(url + "/v/photos/a.jpg")[0] == 200
 
 
-def test_tiff_photo_has_no_img_tag(kb, start):
+def test_heic_photo_has_no_img_tag(kb, start):
     start()
     (kb.root / "photos").mkdir(exist_ok=True)
-    conn = add_photo(kb, "photos/b.tif", "Sken")
-    body = pages.render(kb, conn, "photos/b.tif", {})
+    conn = add_photo(kb, "photos/b.heic", "Sken")
+    body = pages.render(kb, conn, "photos/b.heic", {})
     assert "<img" not in body
     assert "Sken" in body and "cannot show" in body
 

@@ -166,12 +166,16 @@ def _ingest_image(conn, kb, embedder, path, file_id, record: ImageRecord | None 
     rec = record or extract_image(path, kb.settings.exiftool)
     search = normalize(" ".join([rec.title or "", rec.description or "", rec.place or "",
                                  *rec.keywords, *rec.persons_shown]))
-    conn.execute(
+    image_id = conn.execute(
         "INSERT INTO images (file_id, sidecar_path, title, description, date_taken, keywords, "
         "persons_shown, place, gps_lat, gps_lon, search_norm) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (file_id, kb.rel(rec.sidecar) if rec.sidecar else None, rec.title, rec.description,
          rec.date_taken, json.dumps(rec.keywords, ensure_ascii=False),
          json.dumps(rec.persons_shown, ensure_ascii=False), rec.place, rec.gps_lat, rec.gps_lon, search),
+    ).lastrowid
+    conn.executemany(
+        "INSERT INTO image_regions (image_id, name, x, y, w, h) VALUES (?, ?, ?, ?, ?, ?)",
+        [(image_id, r.name, r.x, r.y, r.w, r.h) for r in rec.regions],
     )
     return "ok", None
 

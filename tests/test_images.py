@@ -1,6 +1,9 @@
+import json
+from pathlib import Path
+
 import pytest
 
-from genea.ingest.images import (default_sidecar, extract_image, map_metadata, merge_metadata,
+from genea.ingest.images import (FaceRegion, default_sidecar, extract_image, map_metadata, merge_metadata,
                                  normalize_exif_date, sidecar_for)
 
 
@@ -118,3 +121,67 @@ def test_sidecar_date_beats_every_embedded_date():
     assert rec.date_taken == "1936-07-01"
     both = {"XMP-exif:DateTimeOriginal": "1937:01:02 00:00:00", "XMP-photoshop:DateCreated": "1936:07:01"}
     assert merge_metadata(EMBEDDED, both, None).date_taken == "1937-01-02"  # order inside the sidecar is kept
+
+
+def _regions_md() -> dict:
+    return json.loads((Path(__file__).parent / "fixtures" / "regions_sample.json").read_text(encoding="utf-8"))
+
+
+def test_regions_parsed_from_mwg_metadata():
+    rec = map_metadata(_regions_md(), None)
+    assert rec.regions == [
+        FaceRegion("Novak Jan 1932", 0.59375 - 0.0322266 / 2, 0.348307 - 0.0533854 / 2, 0.0322266, 0.0533854),
+        FaceRegion("Novakova Marie", 0.32959 - 0.0273438 / 2, 0.367839 - 0.0559896 / 2, 0.0273438, 0.0559896),
+        FaceRegion("Dvorak Petr", 0.488281 - 0.0292969 / 2, 0.330404 - 0.0488281 / 2, 0.0292969, 0.0488281),
+    ]
+
+
+def test_single_region_is_a_scalar_in_flat_output():
+    md = {"XMP-mwg-rs:RegionName": "Novak Jan", "XMP-mwg-rs:RegionAreaX": 0.5, "XMP-mwg-rs:RegionAreaY": 0.5,
+          "XMP-mwg-rs:RegionAreaW": 0.2, "XMP-mwg-rs:RegionAreaH": 0.4}
+    [region] = map_metadata(md, None).regions
+    assert (region.name, region.x, region.y, region.w, region.h) == ("Novak Jan", 0.4, 0.3, 0.2, 0.4)
+
+
+def test_regions_skip_bad_entries():
+    md = {
+        "XMP-mwg-rs:RegionName": ["Good One", "", "No Area", "Too Big", "Negative", "Text", "Good Two"],
+        "XMP-mwg-rs:RegionAreaX": [0.5, 0.5, 0.5, 1.5, -0.1, "abc", 0.25],
+        "XMP-mwg-rs:RegionAreaY": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.75],
+        "XMP-mwg-rs:RegionAreaW": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.1],
+        "XMP-mwg-rs:RegionAreaH": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.1],
+    }
+    md["XMP-mwg-rs:RegionAreaX"][2] = None
+    regions = map_metadata(md, None).regions
+    assert [r.name for r in regions] == ["Good One", "Good Two"]
+    assert regions[0] == FaceRegion("Good One", 0.4, 0.4, 0.2, 0.2)
+
+
+def test_regions_skip_boxes_leaving_the_image():
+    md = {
+        "XMP-mwg-rs:RegionName": ["Edge", "Outside"],
+        "XMP-mwg-rs:RegionAreaX": [0.05, 0.5],
+        "XMP-mwg-rs:RegionAreaY": [0.5, 0.5],
+        "XMP-mwg-rs:RegionAreaW": [0.2, 0.2],
+        "XMP-mwg-rs:RegionAreaH": [0.2, 0.2],
+    }
+    assert [r.name for r in map_metadata(md, None).regions] == ["Outside"]
+
+
+def test_regions_with_columns_of_different_length_are_dropped():
+    md = {
+        "XMP-mwg-rs:RegionName": ["Edge", "Outside", "Missing Values"],
+        "XMP-mwg-rs:RegionAreaX": [0.5, 0.5],
+        "XMP-mwg-rs:RegionAreaY": [0.5, 0.5],
+        "XMP-mwg-rs:RegionAreaW": [0.2, 0.2],
+        "XMP-mwg-rs:RegionAreaH": [0.2, 0.2],
+    }
+    assert map_metadata(md, None).regions == []
+
+
+def test_sidecar_regions_replace_embedded():
+    sidecar_md = {"XMP-mwg-rs:RegionName": ["Dvorakova Eva"], "XMP-mwg-rs:RegionAreaX": [0.5],
+                  "XMP-mwg-rs:RegionAreaY": [0.5], "XMP-mwg-rs:RegionAreaW": [0.2], "XMP-mwg-rs:RegionAreaH": [0.2]}
+    rec = merge_metadata(_regions_md(), sidecar_md, Path("a.xmp"))
+    assert [r.name for r in rec.regions] == ["Dvorakova Eva"]
+    assert len(merge_metadata(_regions_md(), {"XMP-dc:Title": "T"}, Path("a.xmp")).regions) == 3

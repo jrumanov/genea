@@ -19,6 +19,10 @@ body { background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, sans-
 h1 { font-size: 1.1rem; word-break: break-all; }
 a { color: inherit; }
 pre { white-space: pre-wrap; word-wrap: break-word; font: inherit; }
+.frame { position: relative; display: inline-block; max-width: 100%; }
+.frame img { display: block; }
+.box { position: absolute; box-sizing: border-box; border: 2px solid var(--mark); outline: 1px solid #000; }
+.box.faint { border-color: var(--muted); outline: none; opacity: .5; }
 mark { background: var(--mark); color: inherit; }
 mark.chunk { background: var(--chunk); }
 mark.chunk mark#hit { background: var(--mark); }
@@ -29,7 +33,14 @@ mark.chunk mark#hit { background: var(--mark); }
 .seg .t { color: var(--muted); font-variant-numeric: tabular-nums; }
 """
 
-SCROLL = "<script>document.getElementById('hit')?.scrollIntoView({block:'center'})</script>"
+WIDE_STYLE = """
+body { max-width: none; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: start; }
+.two > div { min-width: 0; }
+@media (max-width: 50rem) { .two { grid-template-columns: 1fr; } }
+"""
+
+SCROLL ="<script>document.getElementById('hit')?.scrollIntoView({block:'center'})</script>"
 
 
 def int_param(params: dict[str, str], key: str) -> int | None:
@@ -38,15 +49,24 @@ def int_param(params: dict[str, str], key: str) -> int | None:
     return int(value) if value.isascii() and value.isdigit() and len(value) <= 9 else None
 
 
-def shell(title: str, body: str) -> str:
+def shell(title: str, body: str, wide: bool = False) -> str:
     return ("<!doctype html><html lang=en><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width, initial-scale=1'>"
-            f"<title>{html.escape(title)}</title><style>{STYLE}</style></head>"
+            f"<title>{html.escape(title)}</title><style>{STYLE}{WIDE_STYLE if wide else ''}</style></head>"
             f"<body>{body}</body></html>")
 
 
+def notice_body(title: str, message: str) -> str:
+    return f"<h1>{html.escape(title)}</h1><p class=note>{html.escape(message)}</p>"
+
+
 def notice(title: str, message: str) -> str:
-    return shell(title, f"<h1>{html.escape(title)}</h1><p class=note>{html.escape(message)}</p>")
+    return shell(title, notice_body(title, message))
+
+
+def two_pane(left: str, right: str) -> str:
+    """Two columns side by side (stacked on narrow screens)."""
+    return f'<div class="two"><div>{left}</div><div>{right}</div></div>'
 
 
 def header(rel: str) -> str:
@@ -59,6 +79,11 @@ def render(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: dict[s
     row = conn.execute("SELECT kind FROM files WHERE path = ?", (rel,)).fetchone()
     if row is None:
         return notice("Not found", "This file is not available in the viewer.")
+    if row["kind"] == "image" or (row["kind"] == "doc" and Path(rel).suffix.lower() == ".md"):
+        from genea.viewer import sidebyside
+        page = sidebyside.render_pair(kb, conn, rel, params)
+        if page is not None:
+            return page
     if row["kind"] == "doc":
         if Path(rel).suffix.lower() == ".pdf":
             from genea.viewer import pdfview
@@ -73,5 +98,5 @@ def render(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: dict[s
         return gedview.render_ged(kb, rel, params)
     if row["kind"] == "image":
         from genea.viewer import photoview
-        return photoview.render_photo(kb, conn, rel)
+        return photoview.render_photo(kb, conn, rel, params)
     return notice("Not supported yet", "This kind of file has no viewer page yet.")

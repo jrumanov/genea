@@ -17,13 +17,15 @@ class SourceRef(BaseModel):
     chunk: int | None = None
     start_s: float | None = None
     linked: bool = Field(default=True, exclude=True)
+    person: str | None = Field(default=None, exclude=True)  # image links open on this person's face
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def link(self) -> str | None:
         if not self.linked:
             return None
-        return build_link(self.file, line=self.line, page=self.page, chunk=self.chunk, start_s=self.start_s)
+        return build_link(self.file, line=self.line, page=self.page, chunk=self.chunk, start_s=self.start_s,
+                          person=self.person)
 
     @model_serializer(mode="wrap")
     def _drop_empty_link(self, handler, info):

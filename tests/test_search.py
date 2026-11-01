@@ -174,3 +174,17 @@ def test_find_images(tools_with_images):
     wedding = find_images(ctx, person="Jan Novák").images[0]
     assert wedding.persons_shown == ["Jan Novák", "Marie Dvořáková"]
     assert wedding.source.cite() == "[photos/svatba_1932.jpg]"
+
+
+@pytest.mark.exiftool
+def test_find_images_by_person_id_links_with_person(tools_with_images):
+    from genea.viewer import links
+    ctx = tools_with_images
+    links.set_base_url("http://127.0.0.1:8765")
+    try:
+        by_id = find_images(ctx, person="tree.ged#@I16@").images[0]
+        assert by_id.source.link.endswith("/v/photos/svatba_1932.jpg?p=tree.ged%23%40I16%40")
+        by_name = find_images(ctx, person="Jan Novák").images[0]
+        assert "p=" not in by_name.source.link
+    finally:
+        links.set_base_url(None)

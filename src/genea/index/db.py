@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from genea.index.embed import Embedder
     from genea.kb import KnowledgeBase
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 _SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -102,6 +102,16 @@ CREATE TABLE images (
     gps_lon REAL,
     search_norm TEXT NOT NULL
 );
+CREATE TABLE image_regions (
+    id INTEGER PRIMARY KEY,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    w REAL NOT NULL,
+    h REAL NOT NULL
+);
+CREATE INDEX idx_image_regions_image ON image_regions(image_id);
 CREATE TABLE links (
     id INTEGER PRIMARY KEY,
     source_kind TEXT NOT NULL,
