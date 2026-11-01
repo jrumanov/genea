@@ -27,10 +27,11 @@ def build_link(
     chunk: int | None = None,
     start_s: float | None = None,
     span: tuple[int, int] | None = None,
+    person: str | None = None,
 ) -> str | None:
     if _base_url is None:
         return None
-    query: list[tuple[str, int]] = []
+    query: list[tuple[str, int | str]] = []
     if line is not None:
         query.append(("line", line))
     if page is not None:
@@ -41,5 +42,7 @@ def build_link(
         query.append(("t", int(start_s)))
     if span is not None:
         query += [("o", span[0]), ("n", span[1])]
+    if person is not None:
+        query.append(("p", person))
     url = f"{_base_url}/v/{quote(file, safe='/')}"
     return f"{url}?{urlencode(query)}" if query else url

@@ -32,6 +32,28 @@ def test_link_shapes():
     assert links.build_link("a.md", span=(10, 5)) == f"{BASE}/v/a.md?o=10&n=5"
 
 
+def test_build_link_adds_person():
+    links.set_base_url(BASE)
+    assert links.build_link("photos/x.jpg", person="tree.ged#@I12@") == \
+        f"{BASE}/v/photos/x.jpg?p=tree.ged%23%40I12%40"
+
+
+def test_build_link_without_person_unchanged():
+    links.set_base_url(BASE)
+    assert links.build_link("photos/x.jpg", person=None) == f"{BASE}/v/photos/x.jpg"
+    assert links.build_link("a.md", line=3, person=None) == f"{BASE}/v/a.md?line=3"
+
+
+def test_sourceref_person_not_serialized_when_links_stripped():
+    links.set_base_url(BASE)
+    ref = SourceRef(file="photos/x.jpg", person="tree.ged#@I12@")
+    assert ref.model_dump(exclude_none=True)["link"].endswith("?p=tree.ged%23%40I12%40")
+    stored = ref.model_dump(exclude_none=True, context=links.STORED)
+    assert stored == {"file": "photos/x.jpg"}
+    assert "person" not in ref.model_dump(exclude_none=True)
+    assert "person" not in ref.model_dump_json(context=links.STORED)
+
+
 def test_awkward_paths_round_trip():
     links.set_base_url(BASE)
     name = "rodinná história/Šimon #2 100%+.md"

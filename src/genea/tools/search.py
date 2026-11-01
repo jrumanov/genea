@@ -12,7 +12,7 @@ from genea.ingest.docs import DOC_EXTS, extract_document
 from genea.ingest.transcript import Segment, format_time
 from genea.text import PREFIX_MIN, match_span, normalize, snippet
 from genea.tools.family import family_key
-from genea.tools.base import ToolContext, ToolError, parse_person_id
+from genea.tools.base import ToolContext, ToolError, parse_person_id, person_id
 from genea.viewer.links import build_link
 from genea.tools.models import DocHit, DocumentText, ImageOut, ImageResult, SearchResult, SourceRef
 
@@ -222,9 +222,11 @@ def find_images(ctx: ToolContext, person: str | None = None, place: str | None =
                 text: str | None = None, limit: int = 20) -> ImageResult:
     where: list[str] = []
     params: list = []
+    link_person: str | None = None
     if person:
         if "#" in person or person.strip().startswith("@"):
             ged, xref = parse_person_id(ctx, person)
+            link_person = person_id(ged, xref)
             where.append("i.id IN (SELECT source_id FROM links WHERE source_kind = 'image' "
                          "AND person_ged_file = ? AND person_xref = ?)")
             params += [ged, xref]
@@ -248,6 +250,6 @@ def find_images(ctx: ToolContext, person: str | None = None, place: str | None =
         file=r["path"], sidecar=r["sidecar_path"], title=r["title"], description=r["description"],
         date_taken=r["date_taken"], keywords=json.loads(r["keywords"]),
         persons_shown=json.loads(r["persons_shown"]), place=r["place"],
-        gps_lat=r["gps_lat"], gps_lon=r["gps_lon"], source=SourceRef(file=r["path"]),
+        gps_lat=r["gps_lat"], gps_lon=r["gps_lon"], source=SourceRef(file=r["path"], person=link_person),
     ) for r in rows]
     return ImageResult(images=images, sources=[i.source for i in images])
