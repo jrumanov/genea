@@ -75,7 +75,15 @@ port is used if that one is taken, and the startup line on stderr shows the addr
 `[docs/matrika.pdf p.3](http://127.0.0.1:8765/v/...)`. A link opens the PDF page, text or transcript passage, GEDCOM
 line or photo in your browser. In text and PDF pages the whole cited passage gets a light highlight and the matched
 sentence inside it a strong one, scrolled into view (links carry its position as `o` and `n`; unusable values fall
-back to the passage highlight). The viewer serves only indexed files of the knowledge base, never `.genea`, and
+back to the passage highlight). TIFF scans are shown as JPG, converted on first view and cached under
+`.genea/viewer-cache` (the original is never changed; a multi-page TIFF takes `?page=`). A scan opens beside its
+transcript, the `.md` with the same name, and a transcript beside its scan, whichever of the two you open (other
+sides like `_a1`/`_a2` are linked). For a photo link that carries a person id (`p=`, as links from `find_images` by
+person id do), the viewer draws a box on that person's stored face region and the other faces faintly; without a
+stored position it says so. A region name must be written without diacritics, surname first, with an optional
+trailing birth year (`novak jan 1902`) to match a person of the tree; a year that differs from the tree's birth year
+rules the match out. HEIC photos are still not shown (open the original). After upgrading, rebuild the index once
+(schema 3, see Upgrading below) so the face regions are stored. Pillow is a runtime dependency (installed by `uv sync`). The viewer serves only indexed files of the knowledge base, never `.genea`, and
 never ID cards, travel cards, resident permits, driving licences or health insurance cards. Links work only while
 the MCP server runs; stored analyses and proposals never contain them.
 
@@ -217,7 +225,7 @@ beside each one, and `genea summaries import` checks and caches them. The next `
 even without a `summary_model`. In this repo, ask Claude Code to "summarize pending transcripts" (the
 `summarize-transcripts` skill). This sends the transcripts to Anthropic.
 
-Upgrading: the index format changed (schema 2). Run `genea index --rebuild --no-summaries` first to make
+Upgrading: the index format changed (schema 3: face regions). Run `genea index --rebuild --no-summaries` first to make
 everything searchable quickly, then `genea index` to add the summaries (cached ones are reused).
 
 ## Transcribing and repairing recordings
