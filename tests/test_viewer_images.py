@@ -248,3 +248,92 @@ def test_names_html_escaped(kb, start):
     text = body.decode()
     assert "<script>alert" not in text
     assert "&lt;script&gt;" in text
+
+
+def pair(kb, stem="docs/scan_a1", ext=".jpg", text="Narodil sa Jan Novak v Brne.", keywords=()):
+    (kb.root / stem).parent.mkdir(exist_ok=True)
+    (kb.root / (stem + ".md")).write_text(text, encoding="utf-8")
+    return stem
+
+
+def add_image_file(kb, rel, keywords=()):
+    Image.new("RGB", (10, 10)).save(kb.root / rel)
+    return add_photo(kb, rel, "Sken", keywords)
+
+
+def test_md_page_shows_image_pane(kb, start):
+    pair(kb)
+    url = start()
+    add_image_file(kb, "docs/scan_a1.jpg")
+    status, _, body = get(url + "/v/docs/scan_a1.md")
+    text = body.decode()
+    assert status == 200
+    assert '<img src="/raw/docs/scan_a1.jpg"' in text
+    assert "Narodil sa Jan Novak" in text
+    assert text.index('class="two"') < text.index("<img") < text.index("Narodil")
+
+
+def test_image_page_shows_md_pane(kb, start):
+    pair(kb)
+    url = start()
+    add_image_file(kb, "docs/scan_a1.jpg")
+    _, _, body = get(url + "/v/docs/scan_a1.jpg")
+    text = body.decode()
+    assert 'class="two"' in text and "Narodil sa Jan Novak" in text and "<dt>Title</dt>" in text
+
+
+def test_md_without_image_unchanged(kb, start):
+    pair(kb)
+    url = start()
+    _, _, body = get(url + "/v/docs/scan_a1.md")
+    text = body.decode()
+    assert 'class="two"' not in text and "<img" not in text and "max-width: none" not in text
+
+
+def test_image_without_md_unchanged(kb, start):
+    url = start()
+    add_image_file(kb, "docs/lone.jpg")
+    _, _, body = get(url + "/v/docs/lone.jpg")
+    assert 'class="two"' not in body.decode()
+
+
+def test_excluded_image_not_shown_from_md(kb, start):
+    pair(kb)
+    url = start()
+    add_image_file(kb, "docs/scan_a1.jpg", keywords=["resident permit"])
+    status, _, body = get(url + "/v/docs/scan_a1.md")
+    text = body.decode()
+    assert status == 200 and "Narodil sa Jan Novak" in text
+    assert "<img" not in text and "/raw/" not in text.replace("/raw/docs/scan_a1.md", "")
+    assert "scan_a1.jpg" not in text
+    assert get(url + "/v/docs/scan_a1.jpg")[0] == 404
+
+
+def test_sides_links_to_other_side(kb, start):
+    pair(kb)
+    pair(kb, "docs/scan_a2", text="Druha strana.")
+    url = start()
+    add_image_file(kb, "docs/scan_a1.jpg")
+    add_image_file(kb, "docs/scan_a2.jpg")
+    _, _, body = get(url + "/v/docs/scan_a1.md")
+    text = body.decode()
+    assert 'href="/v/docs/scan_a2.md"' in text and 'href="/v/docs/scan_a2.jpg"' in text
+    assert 'href="/v/docs/scan_a1.md"' not in text
+
+
+def test_chunk_highlight_still_applies_in_md_pane(kb, start):
+    pair(kb)
+    url = start()
+    add_image_file(kb, "docs/scan_a1.jpg")
+    _, _, body = get(url + "/v/docs/scan_a1.md?chunk=0&o=0&n=7")
+    text = body.decode()
+    assert '<mark id="hit">Narodil</mark>' in text
+    assert text.index('class="two"') < text.index("<img") < text.index('<mark id="hit">')
+
+
+def test_tiff_scan_with_md(kb, start):
+    pair(kb, "docs/a")
+    url = start()
+    make_tiff(kb, "docs/a.tif")
+    _, _, body = get(url + "/v/docs/a.md")
+    assert '<img src="/raw/docs/a.tif?page=0"' in body.decode()
