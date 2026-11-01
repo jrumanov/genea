@@ -73,5 +73,5 @@ def render(kb: KnowledgeBase, conn: sqlite3.Connection, rel: str, params: dict[s
         return gedview.render_ged(kb, rel, params)
     if row["kind"] == "image":
         from genea.viewer import photoview
-        return photoview.render_photo(kb, conn, rel)
+        return photoview.render_photo(kb, conn, rel, params)
     return notice("Not supported yet", "This kind of file has no viewer page yet.")

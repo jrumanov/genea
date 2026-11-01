@@ -160,6 +160,13 @@ def make_handler(kb: KnowledgeBase, hosts_of) -> type[BaseHTTPRequestHandler]:
                     return
                 if file is None:
                     self._not_found()
+                elif route == "raw" and file.path.lower().endswith((".tif", ".tiff")):
+                    from genea.viewer import convert, pages
+                    page = pages.int_param({"page": (parse_qs(parts.query).get("page") or ["0"])[0]}, "page") or 0
+                    try:
+                        self._send(200, convert.jpeg_for(kb, file.path, page), "image/jpeg", inline=True)
+                    except convert.ConvertError:
+                        self._send(404, notice_page("Not available", "This image page cannot be shown."))
                 elif route == "raw":
                     ctype = mimetypes.guess_type(file.path)[0] or "application/octet-stream"
                     if ctype.startswith("text/"):
