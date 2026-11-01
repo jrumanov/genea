@@ -331,6 +331,55 @@ def test_chunk_highlight_still_applies_in_md_pane(kb, start):
     assert text.index('class="two"') < text.index("<img") < text.index('<mark id="hit">')
 
 
+def test_uppercase_extension_scan_shows_beside_lowercase_md(kb, start):
+    pair(kb, "docs/scan")
+    url = start()
+    add_image_file(kb, "docs/scan.JPG")
+    status, _, body = get(url + "/v/docs/scan.md")
+    text = body.decode()
+    assert status == 200 and '<img src="/raw/docs/scan.JPG"' in text and "Narodil sa Jan Novak" in text
+
+
+def test_uppercase_extension_excluded_scan_not_shown_from_md(kb, start):
+    pair(kb, "docs/scan")
+    url = start()
+    add_image_file(kb, "docs/scan.JPG", keywords=["resident permit"])
+    text = get(url + "/v/docs/scan.md")[2].decode()
+    assert "<img" not in text and "scan.JPG" not in text
+
+
+def test_register_number_is_not_a_side(kb, start):
+    from genea.viewer.sidebyside import sides
+    pair(kb, "docs/reg_d046")
+    pair(kb, "docs/reg_d047")
+    pair(kb, "docs/scan_a1")
+    pair(kb, "docs/scan_a2")
+    start()
+    conn = sqlite3.connect(kb.index_path)
+    conn.row_factory = sqlite3.Row
+    assert sides(kb, conn, "docs/reg_d046.md") == []
+    assert sides(kb, conn, "docs/scan_a1.md") == ["docs/scan_a2.md"]
+
+
+def test_tiff_temp_cleanup_failure_is_not_a_500(kb, start, monkeypatch):
+    import os
+    from pathlib import Path
+    url = start()
+    make_tiff(kb)
+    real_unlink = Path.unlink
+
+    def denied_unlink(self, *args, **kwargs):
+        if self.name.endswith(".tmp"):
+            raise PermissionError("locked")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", denied_unlink)
+    monkeypatch.setattr(os, "replace", lambda *a, **k: (_ for _ in ()).throw(PermissionError("locked")))
+    assert get(url + "/raw/photos/a.tif")[0] == 404
+    monkeypatch.undo()
+    assert get(url + "/raw/photos/a.tif")[0] == 200
+
+
 def test_tiff_scan_with_md(kb, start):
     pair(kb, "docs/a")
     url = start()

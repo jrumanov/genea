@@ -62,4 +62,7 @@ def jpeg_for(kb: KnowledgeBase, rel: str, page: int = 0) -> bytes:
         raise ConvertError(f"{type(exc).__name__}: {exc}") from exc
     finally:
         if temp is not None:
-            temp.unlink(missing_ok=True)
+            try:
+                temp.unlink(missing_ok=True)
+            except OSError:
+                pass

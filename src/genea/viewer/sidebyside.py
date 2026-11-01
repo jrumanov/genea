@@ -13,7 +13,8 @@ from genea.kb import KnowledgeBase
 from genea.viewer import pages, photoview, textview
 from genea.viewer.server import lookup
 
-SIDE_SUFFIX = re.compile(r"_[A-Za-z]\d+$")
+SIDE_SUFFIX = re.compile(r"_[A-Za-z]\d{1,2}$")
+SCAN_EXTS = tuple(ext for ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic") if ext in IMAGE_EXTS)
 
 
 def _stem(rel: str) -> str:
@@ -22,10 +23,12 @@ def _stem(rel: str) -> str:
 
 def sibling_image(kb: KnowledgeBase, conn: sqlite3.Connection, rel_md: str) -> str | None:
     """The viewable image with the same folder and stem as this .md, if lookup allows it."""
-    for ext in sorted(IMAGE_EXTS):
-        found = lookup(kb, conn, _stem(rel_md) + ext)
-        if found is not None and found.kind == "image":
-            return found.path
+    for ext in SCAN_EXTS:
+        for (path,) in conn.execute("SELECT path FROM files WHERE lower(path) = lower(?) ORDER BY path",
+                                    (_stem(rel_md) + ext,)).fetchall():
+            found = lookup(kb, conn, path)
+            if found is not None and found.kind == "image":
+                return found.path
     return None
 
 

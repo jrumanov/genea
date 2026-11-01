@@ -80,11 +80,12 @@ back to the passage highlight). TIFF scans are shown as JPG, converted on first 
 transcript, the `.md` with the same name, and a transcript beside its scan, whichever of the two you open (other
 sides like `_a1`/`_a2` are linked). For a photo link that carries a person id (`p=`, as links from `find_images` by
 person id do), the viewer draws a box on that person's stored face region and the other faces faintly; without a
-stored position it says so. A region name must be written without diacritics, surname first, with an optional
-trailing birth year (`novak jan 1902`) to match a person of the tree; a year that differs from the tree's birth year
-rules the match out. HEIC photos are still not shown (open the original). After upgrading, rebuild the index once
-(schema 3, see Upgrading below) so the face regions are stored. Pillow is a runtime dependency (installed by `uv sync`). The viewer serves only indexed files of the knowledge base, never `.genea`, and
-never ID cards, travel cards, resident permits, driving licences or health insurance cards. Links work only while
+stored position it says so. A region name is matched to a person of the tree by its words: diacritics, case and word
+order do not matter (`Novák Jan` and `jan novak` are the same), and an optional trailing four-digit birth year
+(`novak jan 1902`) must equal the person's birth year in the tree, otherwise the match is ruled out. HEIC photos are
+still not shown (open the original). After upgrading, rebuild the index once (schema 3, see Upgrading below) so the
+face regions are stored. Pillow is a runtime dependency (installed by `uv sync`). The viewer serves only indexed
+files of the knowledge base, never `.genea`, and never ID cards, travel cards, resident permits, driving licences or health insurance cards. Links work only while
 the MCP server runs; stored analyses and proposals never contain them.
 
 ## Quick start

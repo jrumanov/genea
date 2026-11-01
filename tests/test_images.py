@@ -157,15 +157,26 @@ def test_regions_skip_bad_entries():
     assert regions[0] == FaceRegion("Good One", 0.4, 0.4, 0.2, 0.2)
 
 
-def test_regions_skip_boxes_leaving_the_image_and_short_lists():
+def test_regions_skip_boxes_leaving_the_image():
     md = {
-        "XMP-mwg-rs:RegionName": ["Edge", "Outside", "Missing Values"],
+        "XMP-mwg-rs:RegionName": ["Edge", "Outside"],
         "XMP-mwg-rs:RegionAreaX": [0.05, 0.5],
         "XMP-mwg-rs:RegionAreaY": [0.5, 0.5],
         "XMP-mwg-rs:RegionAreaW": [0.2, 0.2],
         "XMP-mwg-rs:RegionAreaH": [0.2, 0.2],
     }
     assert [r.name for r in map_metadata(md, None).regions] == ["Outside"]
+
+
+def test_regions_with_columns_of_different_length_are_dropped():
+    md = {
+        "XMP-mwg-rs:RegionName": ["Edge", "Outside", "Missing Values"],
+        "XMP-mwg-rs:RegionAreaX": [0.5, 0.5],
+        "XMP-mwg-rs:RegionAreaY": [0.5, 0.5],
+        "XMP-mwg-rs:RegionAreaW": [0.2, 0.2],
+        "XMP-mwg-rs:RegionAreaH": [0.2, 0.2],
+    }
+    assert map_metadata(md, None).regions == []
 
 
 def test_sidecar_regions_replace_embedded():

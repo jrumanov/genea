@@ -121,6 +121,8 @@ def parse_regions(md: dict) -> list[FaceRegion]:
     box center; the result holds the top-left corner. Entries without a name, with a missing or
     non-numeric value, a value outside 0..1 or a box leaving the image are skipped."""
     columns = [_region_column(md, tag) for tag in REGION_TAGS]
+    if len({len(column) for column in columns}) > 1:
+        return []  # lists of different lengths cannot be paired up; a shifted list would mislabel boxes
     regions = []
     for name, *area in zip(*columns):
         name = str(name).strip() if name is not None else ""
