@@ -153,3 +153,98 @@ def test_tiff_replace_failure_gives_404_and_no_tmp(kb, start, monkeypatch):
     monkeypatch.setattr(os, "replace", denied)
     assert get(url + "/raw/photos/a.tif")[0] == 404
     assert not list((kb.index_path.parent / "viewer-cache").glob("*.tmp"))
+
+
+def add_person(conn, xref, names_norm):
+    file_id = conn.execute("SELECT id FROM files LIMIT 1").fetchone()[0]
+    conn.execute("INSERT INTO persons (file_id, ged_file, xref, name_norm, names_norm, name_variants, line_no) "
+                 "VALUES (?, 'tree.ged', ?, ?, ?, '', 1)", (file_id, xref, names_norm.split("|")[0].strip(), names_norm))
+    conn.commit()
+
+
+def add_regions(conn, rel, regions):
+    image_id = conn.execute("SELECT i.id FROM images i JOIN files f ON f.id = i.file_id WHERE f.path = ?",
+                            (rel,)).fetchone()[0]
+    conn.executemany("INSERT INTO image_regions (image_id, name, x, y, w, h) VALUES (?, ?, ?, ?, ?, ?)",
+                     [(image_id, *r) for r in regions])
+    conn.commit()
+
+
+def photo_with_regions(kb, regions, rel="photos/f.jpg"):
+    (kb.root / "photos").mkdir(exist_ok=True)
+    Image.new("RGB", (10, 10)).save(kb.root / rel)
+    conn = add_photo(kb, rel, "Foto")
+    add_regions(conn, rel, regions)
+    add_person(conn, "@T1@", "jan novak")
+    add_person(conn, "@T2@", "marie novakova")
+    add_person(conn, "@T3@", "jan novak")
+    return conn
+
+
+def test_matching_region_is_boxed(kb, start):
+    url = start()
+    photo_with_regions(kb, [("Novak Jan", 0.1, 0.2, 0.3, 0.4), ("Novakova Marie", 0.5, 0.25, 0.125, 0.5)])
+    _, _, body = get(url + "/v/photos/f.jpg?p=tree.ged%23%40T1%40")
+    text = body.decode()
+    assert text.count('class="box"') == 1
+    assert 'class="box" style="left:10.0%;top:20.0%;width:30.0%;height:40.0%" title="Novak Jan"' in text
+    assert 'class="box faint"' in text and 'title="Novakova Marie"' in text
+    assert '<div class="frame"><img' in text
+
+
+def test_no_match_shows_note(kb, start):
+    url = start()
+    photo_with_regions(kb, [("Novakova Marie", 0.5, 0.25, 0.125, 0.5)])
+    _, _, body = get(url + "/v/photos/f.jpg?p=tree.ged%23%40T1%40")
+    text = body.decode()
+    assert "No face position stored for this person." in text
+    assert 'class="box"' not in text
+
+
+def test_unknown_p_shows_no_box_and_no_note_no_crash(kb, start):
+    url = start()
+    photo_with_regions(kb, [("Novak Jan", 0.1, 0.2, 0.3, 0.4)])
+    for p in ("tree.ged%23%40T99%40", "garbage", "%23", "tree.ged%23", ""):
+        status, _, body = get(url + "/v/photos/f.jpg?p=" + p)
+        text = body.decode()
+        assert status == 200
+        assert "No face position stored" not in text
+        assert 'class="box"' not in text
+
+
+def test_two_matching_people_marks_both(kb, start):
+    url = start()
+    photo_with_regions(kb, [("Novak Jan", 0.1, 0.2, 0.3, 0.4), ("Novakova Marie", 0.5, 0.25, 0.125, 0.5),
+                            ("Other Person", 0.7, 0.7, 0.1, 0.1)])
+    _, _, body = get(url + "/v/photos/f.jpg?p=tree.ged%23%40T1%40")
+    assert body.decode().count('class="box"') == 1
+    # a second person form matching Marie: make I3 also match her
+    conn = sqlite3.connect(kb.index_path)
+    conn.execute("UPDATE persons SET names_norm = 'jan novak | marie novakova' WHERE xref = '@T3@'")
+    conn.commit()
+    _, _, body = get(url + "/v/photos/f.jpg?p=tree.ged%23%40T3%40")
+    text = body.decode()
+    assert text.count('class="box"') == 2
+    assert text.count('class="box faint"') == 1
+
+
+def test_regions_only_on_first_tiff_page(kb, start):
+    url = start()
+    make_tiff(kb)
+    conn = sqlite3.connect(kb.index_path)
+    add_regions(conn, "photos/a.tif", [("Novak Jan", 0.1, 0.2, 0.3, 0.4)])
+    add_person(conn, "@T1@", "jan novak")
+    p = "?p=tree.ged%23%40T1%40"
+    assert 'class="box"' in get(url + "/v/photos/a.tif" + p)[2].decode()
+    later = get(url + "/v/photos/a.tif" + p + "&page=1")[2].decode()
+    assert 'class="box' not in later
+    assert "No face position stored" not in later
+
+
+def test_names_html_escaped(kb, start):
+    url = start()
+    photo_with_regions(kb, [("<script>alert(1)</script>", 0.1, 0.2, 0.3, 0.4)])
+    _, _, body = get(url + "/v/photos/f.jpg?p=tree.ged%23%40T1%40")
+    text = body.decode()
+    assert "<script>alert" not in text
+    assert "&lt;script&gt;" in text

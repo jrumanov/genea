@@ -19,6 +19,10 @@ body { background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, sans-
 h1 { font-size: 1.1rem; word-break: break-all; }
 a { color: inherit; }
 pre { white-space: pre-wrap; word-wrap: break-word; font: inherit; }
+.frame { position: relative; display: inline-block; max-width: 100%; }
+.frame img { display: block; }
+.box { position: absolute; box-sizing: border-box; border: 2px solid var(--mark); outline: 1px solid #000; }
+.box.faint { border-color: var(--muted); outline: none; opacity: .5; }
 mark { background: var(--mark); color: inherit; }
 mark.chunk { background: var(--chunk); }
 mark.chunk mark#hit { background: var(--mark); }
