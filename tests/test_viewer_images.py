@@ -119,3 +119,37 @@ def test_tiff_photo_page_shows_img_tag(kb, start):
     status, _, body = get(url + "/v/photos/a.tif")
     assert status == 200
     assert b'<img src="/raw/photos/a.tif' in body
+
+
+@pytest.mark.parametrize("exc", [__import__("struct").error("x"), SyntaxError("x"), KeyError("x"),
+                                 ZeroDivisionError(), NotImplementedError(), OverflowError(), TypeError()])
+def test_tiff_decoder_errors_give_404(kb, start, monkeypatch, exc):
+    url = start()
+    make_tiff(kb)
+
+    def boom(*args, **kwargs):
+        raise exc
+
+    monkeypatch.setattr(Image, "open", boom)
+    assert get(url + "/raw/photos/a.tif")[0] == 404
+
+
+def test_zero_byte_tiff_gives_404(kb, start):
+    url = start()
+    make_tiff(kb)
+    (kb.root / "photos" / "empty.tif").write_bytes(b"")
+    add_photo(kb, "photos/empty.tif", "Empty")
+    assert get(url + "/raw/photos/empty.tif")[0] == 404
+
+
+def test_tiff_replace_failure_gives_404_and_no_tmp(kb, start, monkeypatch):
+    import os
+    url = start()
+    make_tiff(kb)
+
+    def denied(*args, **kwargs):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(os, "replace", denied)
+    assert get(url + "/raw/photos/a.tif")[0] == 404
+    assert not list((kb.index_path.parent / "viewer-cache").glob("*.tmp"))
