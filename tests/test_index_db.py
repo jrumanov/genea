@@ -12,7 +12,7 @@ def test_connect_creates_schema(tmp_path):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
     assert TABLES <= names
     meta = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta")}
-    assert meta == {"schema_version": "2", "embed_model": "fake", "embed_dim": "8"}
+    assert meta == {"schema_version": "3", "embed_model": "fake", "embed_dim": "8"}
     conn.close()
 
 

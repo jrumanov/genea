@@ -1,0 +1,16 @@
+{
+  "File:ImageWidth": 2048,
+  "XMP-mwg-rs:RegionAppliedToDimensionsH": 1536,
+  "XMP-mwg-rs:RegionAppliedToDimensionsUnit": "pixel",
+  "XMP-mwg-rs:RegionAppliedToDimensionsW": 2048,
+  "XMP-mwg-rs:RegionAreaH": [0.0533854, 0.0559896, 0.0488281],
+  "XMP-mwg-rs:RegionAreaUnit": ["normalized", "normalized", "normalized"],
+  "XMP-mwg-rs:RegionAreaW": [0.0322266, 0.0273438, 0.0292969],
+  "XMP-mwg-rs:RegionAreaX": [0.59375, 0.32959, 0.488281],
+  "XMP-mwg-rs:RegionAreaY": [0.348307, 0.367839, 0.330404],
+  "XMP-mwg-rs:RegionName": ["Novak Jan 1932", "Novakova Marie", "Dvorak Petr"],
+  "XMP-mwg-rs:RegionType": ["Face", "Face", "Face"],
+  "XMP-MP:RegionPersonDisplayName": ["Novak Jan 1932", "Novakova Marie", "Dvorak Petr"],
+  "XMP-MP:RegionRectangle": ["0.577637, 0.321615, 0.0322266, 0.0533854", "0.315918, 0.339844, 0.0273438, 0.0559896", "0.473633, 0.30599, 0.0292969, 0.0488281"],
+  "IFD0:Orientation": 1
+}
