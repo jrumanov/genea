@@ -48,8 +48,16 @@ def current_state(ctx: ToolContext, analysis: Analysis) -> str:
     return "ready" if analysis.index_state == "ready" else "outdated"
 
 
+def not_in_tree(ctx: ToolContext, analysis: Analysis) -> set[str]:
+    """Ids of written proposals whose change the indexed tree does not show (where the index can show it)."""
+    from genea.analysis.apply import written_but_missing  # apply.py imports this module
+
+    return {p.id for p in analysis.proposals if written_but_missing(ctx, analysis, p)}
+
+
 def write_report(ctx: ToolContext, analysis: Analysis) -> None:
-    store.write_atomic(store.analysis_dir(ctx.kb, analysis.name) / "report.md", render_report(analysis))
+    store.write_atomic(store.analysis_dir(ctx.kb, analysis.name) / "report.md",
+                       render_report(analysis, missing=not_in_tree(ctx, analysis)))
 
 
 def analyze(ctx: ToolContext, kind: str, target_id: str, direction: str = "both", depth: int = 4) -> AnalysisPage:
@@ -109,7 +117,7 @@ def _page(ctx: ToolContext, analysis: Analysis, page: int, severity: str | None)
         counts=analysis.counts(), page=page, pages=pages,
         findings=[FindingView(**f.model_dump(), status=analysis.finding_status(f.id)) for f in chunk],
         proposals=proposals, report=ctx.kb.rel(folder / "report.md"),
-        message=STATE_WARNINGS.get(state), sources=sources,
+        not_in_tree=sorted(not_in_tree(ctx, analysis)), message=STATE_WARNINGS.get(state), sources=sources,
     )
 
 
@@ -239,6 +247,9 @@ def withdraw(ctx: ToolContext, name: str, proposal_id: str) -> AnalysisUpdate:
     proposal = next((p for p in analysis.proposals if p.id == proposal_id), None)
     if proposal is None:
         raise ToolError(f"No proposal {proposal_id} in {name}.")
+    if proposal.status == "written":
+        raise ToolError(f"{proposal_id} is written to Gramps Web; to undo it run `genea analysis undo {name} "
+                        f"{proposal_id}`.")
     users = [p.id for p in analysis.proposals
              if p.status != "withdrawn" and p.payload.get("child_id") == f"proposal:{proposal_id}"]
     if users:

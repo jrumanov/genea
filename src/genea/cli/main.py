@@ -9,6 +9,7 @@ from genea.cli import (  # noqa: E402,F401
     agentcmds,
     changecmds,
     dnacmds,
+    grampscmds,
     indexcmds,
     kbcmds,
     mcpcmds,

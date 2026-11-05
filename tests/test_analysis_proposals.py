@@ -196,3 +196,12 @@ def test_dna_results_can_be_cited(actx, analysis_kb, name):
     result = api.propose(actx, name, "add_note", {"person_id": "tree.ged#@I1@", "text": "Y: R-P312"}, [cite],
                          "yhaplo called R-P312")
     assert result.status == "active"
+
+
+def test_withdraw_refuses_written_proposal(actx, analysis_kb, name):
+    pid = api.propose(actx, name, "add_note", {"person_id": "tree.ged#@I3@", "text": "n"}, CITE, "r").proposal_id
+    analysis = store.load(analysis_kb, name)
+    analysis.proposals[0].status = "written"
+    store.save(analysis_kb, analysis)
+    with pytest.raises(ToolError, match=f"written to Gramps Web.*genea analysis undo {name} {pid}"):
+        api.withdraw(actx, name, pid)

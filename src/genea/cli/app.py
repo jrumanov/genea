@@ -21,6 +21,8 @@ app.add_typer(analysis_app, name="analysis")
 dna_app = typer.Typer(no_args_is_help=True,
                       help="Analyse a MyHeritage raw DNA file: mtDNA and Y haplogroups, SNP lookups for the agent.")
 app.add_typer(dna_app, name="dna")
+gramps_app = typer.Typer(no_args_is_help=True, help="Log in to and check the Gramps Web server used for write-back.")
+app.add_typer(gramps_app, name="gramps")
 
 
 @app.callback()

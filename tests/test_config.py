@@ -80,3 +80,12 @@ def test_viewer_port_setting(isolated_home, tmp_path):
     (kb / ".genea").mkdir(parents=True)
     (kb / ".genea" / "config.toml").write_text("viewer_port = 9100\n", encoding="utf-8")
     assert load_settings(kb).viewer_port == 9100
+
+
+def test_gramps_web_trees_table(isolated_home, tmp_path):
+    (tmp_path / ".genea").mkdir()
+    (tmp_path / ".genea" / "config.toml").write_text(
+        'gramps_web_url = "https://gw.example.net"\n[gramps_web_trees]\n"a/tree.ged" = "genea-me"\n', encoding="utf-8")
+    s = load_settings(tmp_path)
+    assert s.gramps_web_url == "https://gw.example.net" and s.gramps_web_trees == {"a/tree.ged": "genea-me"}
+    assert s.gramps_web_xml_snapshot is True and not hasattr(s, "gedcom_direct_write")

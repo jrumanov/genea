@@ -37,6 +37,20 @@ class Finding(BaseModel):
 Operation = Literal["add_event", "update_event", "add_note", "add_source_citation", "link_child", "add_person"]
 
 
+class WrittenObject(BaseModel):
+    kind: str  # "people", "events", ...
+    handle: str
+    gramps_id: str | None
+    created: bool
+    transaction: int  # newest id in /transactions/history/ for this object after the request
+
+
+class WriteRecord(BaseModel):
+    at: str
+    objects: list[WrittenObject]
+    pr: str | None = None
+
+
 class Proposal(BaseModel):
     id: str
     finding_id: str | None = None
@@ -48,8 +62,16 @@ class Proposal(BaseModel):
     sources: list[SourceRef]
     rationale: str
     created: str
-    status: Literal["active", "withdrawn", "stale"] = "active"
+    status: Literal["active", "withdrawn", "stale", "written", "failed"] = "active"
     stale_reason: str | None = None
+    written: WriteRecord | None = None
+    error: str | None = None
+
+
+class LastBuild(BaseModel):
+    version: int
+    base_hash: str  # sha256 of the real tree the build was made from
+    proposals: list[str]  # ids of the proposals the build applied
 
 
 class AnalysisNote(BaseModel):
@@ -72,6 +94,7 @@ class Analysis(BaseModel):
     dismissed: dict[str, str] = Field(default_factory=dict)  # finding id -> reason ("" if none given)
     notes: list[AnalysisNote] = Field(default_factory=list)
     iterations: int = 0
+    last_build: LastBuild | None = None
 
     def finding_status(self, finding_id: str) -> str:
         if finding_id in self.dismissed:
@@ -84,6 +107,8 @@ class Analysis(BaseModel):
         out = {s: sum(f.severity == s for f in self.findings) for s in SEVERITIES}
         out["proposals"] = sum(p.status == "active" for p in self.proposals)
         out["stale"] = sum(p.status == "stale" for p in self.proposals)
+        out["written"] = sum(p.status == "written" for p in self.proposals)
+        out["failed"] = sum(p.status == "failed" for p in self.proposals)
         out["dismissed"] = len(self.dismissed)
         return out
 
@@ -103,6 +128,7 @@ class AnalysisPage(ToolResult):
     findings: list[FindingView]
     proposals: list[Proposal]
     report: str
+    not_in_tree: list[str] = Field(default_factory=list)  # written proposals whose change the index does not show (where the index can show it)
     message: str | None = None
 
 
