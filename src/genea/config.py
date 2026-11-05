@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 
 
@@ -20,7 +20,9 @@ class Settings:
     viewer_port: int = 8765  # localhost port of the citation viewer started by genea mcp
     privacy_notice: bool = True
     log_prompts: bool = True
-    gedcom_direct_write: bool = False
+    gramps_web_url: str = ""  # base URL of the Gramps Web server, e.g. https://gw.example.net
+    gramps_web_trees: dict[str, str] = field(default_factory=dict)  # KB-relative GEDCOM path -> Gramps Web tree id
+    gramps_web_xml_snapshot: bool = True  # save a Gramps XML export before and after each write-back
     exclude: tuple[str, ...] = ()
     exiftool: str = "exiftool"
     summary_model: str = ""  # Ollama model for transcript summaries; empty: the chat model, if it is an ollama: one
@@ -45,9 +47,17 @@ def _load_toml(path: Path) -> dict:
         return tomllib.load(f)
 
 
+def _coerce(key: str, value):
+    if key == "exclude":
+        return tuple(value)
+    if key == "gramps_web_trees":
+        return dict(value)
+    return value
+
+
 def _apply(settings: Settings, data: dict) -> Settings:
     known = {f.name for f in fields(Settings)}
-    updates = {k: (tuple(v) if k == "exclude" else v) for k, v in data.items() if k in known}
+    updates = {k: _coerce(k, v) for k, v in data.items() if k in known}
     return replace(settings, **updates)
 
 
