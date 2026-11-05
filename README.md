@@ -165,6 +165,37 @@ by a `NOTE` starting `GENEA vN`. Conflicts (`error` and `needs_review` findings)
 - An iteration cannot be imported into Gramps (Gramps would duplicate everyone). Review the diff and enter the
   changes in Gramps; `GENEA` notes are never indexed as evidence.
 
+## Write approved proposals to Gramps Web
+
+Once you have reviewed a build, genea can write its proposals into your Gramps Web tree and record the result as
+a before/after snapshot PR on the repo that holds the `.ged`. Gramps Web 3.22.0 (API version) or newer is needed.
+Nothing is written without your confirmation, and there is no MCP tool for it: Claude can propose and build, only
+you can apply.
+
+```toml
+gramps_web_url = "https://gramps.example.net"   # https only (http for localhost)
+gramps_web_xml_snapshot = true                   # also keep a Gramps XML export in each snapshot
+
+[gramps_web_trees]
+"rodina/tree.ged" = "genea"                      # KB-relative .ged -> Gramps Web user of that tree
+```
+
+Install the keyring support with `uv sync --extra gramps`, then store the password once with
+`genea gramps login rodina/tree.ged` (it is asked without echo; `GENEA_GRAMPS_PASSWORD_<USER>` also works).
+Give that user the **Editor** role: genea needs to add, edit and delete objects (clean-up and undo delete).
+`genea gramps check` shows the user, tree, version and permissions.
+
+1. `genea analysis build <name>` and review the diff.
+2. `genea analysis apply <name>` shows each proposal with its citations and diff hunk (`--dry-run` stops there,
+   `--proposal p-2` picks some, `--yes` skips the question), writes them to Gramps Web and opens the snapshot PR.
+3. Merge the PR, `git pull`, then `genea index`.
+
+The clone must be clean, on `main` and up to date, and the tree must not have changed since the build. A proposal
+that is stale (its record changed in Gramps) is skipped; one that ended `failed` can be retried by running
+`genea analysis build <name>` again and then `apply`. `genea analysis undo <name> <proposal-id>` reverts a written
+proposal in Gramps Web and opens another PR. `genea snapshot <ged>` opens a PR with the tree as Gramps Web has it,
+for edits you made there by hand.
+
 ## DNA (MyHeritage raw data)
 
 genea can read a MyHeritage raw DNA download (`MyHeritage_raw_dna_data.csv`, build 37) for one person of the tree

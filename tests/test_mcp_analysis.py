@@ -50,3 +50,8 @@ def test_bad_proposal_is_an_error_for_claude(actx):
         _call(server, "propose", {"name": name, "operation": "add_note",
                                   "payload": {"person_id": "tree.ged#@I3@", "text": "x"}, "sources": [],
                                   "rationale": "why"})
+
+
+def test_mcp_has_no_apply_tool(actx):
+    names = {t.name for t in asyncio.run(build_server(actx).list_tools())}
+    assert not {n for n in names if "apply" in n or "undo" in n}
