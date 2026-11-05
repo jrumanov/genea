@@ -8,6 +8,7 @@ from fixtures.analysis_tree import DOCS, TREE
 from fixtures.fake_gramps import FakeGramps
 
 from genea.analysis import api, store
+from genea.gramps.write import write_proposal
 from genea.analysis.apply import apply_analysis, prepare, snapshot_only, undo_proposal, written_but_missing
 from genea.gramps import snapshot
 from genea.gramps.dates import to_gramps_date
@@ -311,19 +312,22 @@ def test_link_child_goes_stale_with_its_person(ctx, fake, run):
     assert "was not written" in result.stale[link]
 
 
-def test_saved_after_each_proposal(ctx, fake, run):
+def test_saved_after_each_proposal(ctx, fake, run, monkeypatch):
     name = _analysis(ctx)
     p1 = _update(ctx, name, "@I3@", "2 JAN 1878")
     p2 = _update(ctx, name, "@I4@", "2 JUN 1878")
     api.build_iteration(ctx, name)
 
-    def handler(request):
-        if request.method == "PUT" and request.url.path == f"/api/events/{_event_handle('@I4@', 'BIRT')}":
-            raise RuntimeError("crash")
-        return fake._handle(request)
+    real = write_proposal
 
+    def crashing(client, target, log):
+        if target.proposal.id == p2:
+            raise RuntimeError("crash")
+        return real(client, target, log)
+
+    monkeypatch.setattr("genea.analysis.apply.write_proposal", crashing)
     with pytest.raises(ToolError, match=f"after {p1} were written.*genea snapshot {GED}"):
-        _apply(ctx, name, fake, run, httpx.MockTransport(handler))
+        _apply(ctx, name, fake, run)
     assert _proposal(ctx, name, p1).status == "written"
     assert _proposal(ctx, name, p2).status == "active"
 
@@ -422,7 +426,7 @@ def test_snapshot_only(ctx, fake, run, prs, repo):
     assert prs == []
 
 
-def test_crash_before_anything_written_is_raised_as_is(ctx, fake, run):
+def test_crash_before_anything_written_is_raised_as_is(ctx, fake, run, monkeypatch):
     name = _analysis(ctx)
     _update(ctx, name, "@I3@", "2 JAN 1878")
     api.build_iteration(ctx, name)
@@ -432,8 +436,12 @@ def test_crash_before_anything_written_is_raised_as_is(ctx, fake, run):
             raise RuntimeError("crash")
         return fake._handle(request)
 
+    def crashing(client, target, log):
+        raise RuntimeError("crash")
+
+    monkeypatch.setattr("genea.analysis.apply.write_proposal", crashing)
     with pytest.raises(RuntimeError):
-        _apply(ctx, name, fake, run, httpx.MockTransport(handler))
+        _apply(ctx, name, fake, run)
 
 
 def test_failed_proposal_is_retried_after_rebuild(ctx, fake, run):

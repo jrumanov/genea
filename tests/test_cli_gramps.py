@@ -110,3 +110,23 @@ def test_missing_credentials_exit_1(cli, monkeypatch):
     monkeypatch.setitem(sys.modules, "keyring", types.SimpleNamespace(get_password=lambda *a: None))
     result = cli("gramps", "check")
     assert result.exit_code == 1 and "genea gramps login" in result.output
+
+
+def test_apply_failed_proposal_exits_1(ctx, cli, fake):
+    name, pid = _built(ctx)
+    fake.fail_on[("PUT", "/api/events/")] = 500
+    result = cli("analysis", "apply", name, "--yes")
+    assert result.exit_code == 1, result.output
+    assert f"failed: {pid}" in result.output
+
+
+def test_login_keyring_error_is_clean(cli, fake, monkeypatch):
+    def boom(*a):
+        raise RuntimeError("secret pw detail")
+
+    monkeypatch.setitem(sys.modules, "keyring", types.SimpleNamespace(set_password=boom, get_password=lambda *a: None))
+    result = cli("gramps", "login", GED, input="pw\n")
+    assert result.exit_code == 1
+    assert "login ok, but the password could not be stored: RuntimeError" in result.output
+    assert "GENEA_GRAMPS_PASSWORD_ME" in result.output and "secret" not in result.output
+    assert "Traceback" not in result.output

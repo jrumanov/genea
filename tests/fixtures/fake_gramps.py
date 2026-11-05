@@ -27,6 +27,9 @@ def etag_of(obj: dict) -> str:
 class FakeGramps:
     def __init__(self):
         self.tree = "tree-a"
+        self.omit_tree_claim = False
+        self.html_on: set[tuple[str, str]] = set()  # (method, path prefix) -> 200 with an HTML body
+        self.empty_post_response = False  # POST answers 201 with []
         self.version = "3.22.0"
         self.permissions = ["ViewPrivate", "AddObject", "EditObject", "DeleteObject"]
         self.objects: dict[str, dict[str, dict]] = {k: {} for k in KINDS}
@@ -50,6 +53,8 @@ class FakeGramps:
     def _token(self) -> str:
         self._tokens += 1
         claims = {"tree": self.tree, "permissions": self.permissions, "n": self._tokens}
+        if self.omit_tree_claim:
+            del claims["tree"]
         return f"{_b64({'alg': 'none'})}.{_b64(claims)}.sig"
 
     @staticmethod
@@ -57,6 +62,13 @@ class FakeGramps:
         return httpx.Response(status, json=body, headers=headers)
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
+        resp = self._dispatch(request)
+        if resp.status_code < 400 and any(request.method == m and request.url.path.startswith(p)
+                                          for m, p in self.html_on):  # applied, but the body is not JSON
+            return httpx.Response(resp.status_code, text="<html>proxy</html>", headers={"content-type": "text/html"})
+        return resp
+
+    def _dispatch(self, request: httpx.Request) -> httpx.Response:
         method, path = request.method, request.url.path
         self.requests.append((method, path))
         for (m, prefix), status in list(self.fail_on.items()):
@@ -99,6 +111,8 @@ class FakeGramps:
                 obj["gramps_id"] = f"{KINDS[kind][0]}{len(self.objects[kind]) + 1000:04d}"
             handle = self.add(kind, obj)
             tid = self._record(kind, handle, None, self.objects[kind][handle])
+            if self.empty_post_response:
+                return self._json(201, [])
             return self._json(201, [{"type": "add", "handle": handle, "_class": KINDS[kind], "trans_id": tid}])
         params = request.url.params
         items = list(self.objects[kind].values())

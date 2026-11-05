@@ -247,6 +247,9 @@ def withdraw(ctx: ToolContext, name: str, proposal_id: str) -> AnalysisUpdate:
     proposal = next((p for p in analysis.proposals if p.id == proposal_id), None)
     if proposal is None:
         raise ToolError(f"No proposal {proposal_id} in {name}.")
+    if proposal.status == "written":
+        raise ToolError(f"{proposal_id} is written to Gramps Web; to undo it run `genea analysis undo {name} "
+                        f"{proposal_id}`.")
     users = [p.id for p in analysis.proposals
              if p.status != "withdrawn" and p.payload.get("child_id") == f"proposal:{proposal_id}"]
     if users:

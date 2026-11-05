@@ -96,7 +96,7 @@ class GrampsClient:
         resp = self._send("POST", path, auth=False, retry=False,
                           headers={"Authorization": f"Bearer {self._refresh}"})
         self._check(resp, "POST", path)
-        self._access = resp.json()["access_token"]
+        self._access = self._json(resp, "POST", path)["access_token"]
 
     @staticmethod
     def _message(resp: httpx.Response) -> str:
@@ -110,18 +110,30 @@ class GrampsClient:
             raise GrampsError(f"{method} {path}: {resp.status_code} {self._message(resp)}")
         return resp
 
+    @staticmethod
+    def _json(resp: httpx.Response, method: str, path: str):
+        try:
+            return resp.json()
+        except ValueError as e:
+            raise GrampsError(f"{method} {path}: the response is not JSON") from e
+
     def _call(self, method: str, path: str, **kw) -> httpx.Response:
         return self._check(self._send(method, path, **kw), method, path)
+
+    def _call_json(self, method: str, path: str, **kw):
+        return self._json(self._call(method, path, **kw), method, path)
 
     def login(self) -> str:
         path = "/api/token/"
         resp = self._send("POST", path, auth=False,
                           json={"username": self.user, "password": self._password})
-        body = self._check(resp, "POST", path).json()
+        body = self._json(self._check(resp, "POST", path), "POST", path)
         self._access, self._refresh = body["access_token"], body.get("refresh_token", "")
         self._claims = _claims(self._access)
-        tree = str(self._claims.get("tree", ""))
-        meta = self._call("GET", "/api/metadata/").json()
+        tree = str(self._claims.get("tree") or "")
+        if not tree:
+            raise WrongTree("Gramps Web returned no tree claim; refusing to write")
+        meta = self._call_json("GET", "/api/metadata/")
         self._version = str(meta.get("gramps_webapi", {}).get("version", ""))
         if _version(self._version) < MIN_API_VERSION:
             need = ".".join(map(str, MIN_API_VERSION))
@@ -149,39 +161,39 @@ class GrampsClient:
 
     def get(self, kind: str, handle: str) -> tuple[dict, str]:
         resp = self._call("GET", f"/api/{kind}/{handle}")
-        return resp.json(), resp.headers.get("ETag", "").strip('"')
+        return self._json(resp, "GET", f"/api/{kind}/{handle}"), resp.headers.get("ETag", "").strip('"')
 
     def find_by_gramps_id(self, kind: str, gramps_id: str) -> dict | None:
-        rows = self._call("GET", f"/api/{kind}/", params={"gramps_id": gramps_id}).json()
+        rows = self._call_json("GET", f"/api/{kind}/", params={"gramps_id": gramps_id})
         return rows[0] if rows else None
 
     def list_all(self, kind: str, keys: str) -> list[dict]:
         out: list[dict] = []
         page = 1
         while True:
-            rows = self._call("GET", f"/api/{kind}/",
-                              params={"keys": keys, "page": page, "pagesize": PAGE_SIZE}).json()
+            rows = self._call_json("GET", f"/api/{kind}/",
+                                   params={"keys": keys, "page": page, "pagesize": PAGE_SIZE})
             out.extend(rows)
             if len(rows) < PAGE_SIZE:
                 return out
             page += 1
 
     def create(self, kind: str, obj: dict) -> list[dict]:
-        return self._call("POST", f"/api/{kind}/", json=obj).json()
+        return self._call_json("POST", f"/api/{kind}/", json=obj)
 
     def update(self, kind: str, handle: str, obj: dict, etag: str) -> list[dict]:
         path = f"/api/{kind}/{handle}"
         resp = self._send("PUT", path, json=obj, headers={"If-Match": f'"{etag}"'})
         if resp.status_code == 412:
             raise Conflict(f"PUT {path}: the object changed on the server")
-        return self._check(resp, "PUT", path).json()
+        return self._json(self._check(resp, "PUT", path), "PUT", path)
 
     def delete(self, kind: str, handle: str) -> None:
         self._call("DELETE", f"/api/{kind}/{handle}")
 
     def latest_transaction(self, obj_class: str, handle: str) -> int:
-        rows = self._call("GET", f"/api/transactions/history/objects/{obj_class}/{handle}",
-                          params={"sort": "-id", "pagesize": 1}).json()
+        rows = self._call_json("GET", f"/api/transactions/history/objects/{obj_class}/{handle}",
+                               params={"sort": "-id", "pagesize": 1})
         if not rows:
             raise GrampsError(f"No transaction found for {obj_class} {handle}")
         return rows[0]["id"]

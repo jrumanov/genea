@@ -144,11 +144,13 @@ def write_proposal(client: GrampsClient, target: Target, log: WriteLog) -> Write
     w = _Writer(client, log, p.id)
     try:
         WRITERS[p.operation](w, target)
-    except GrampsError as e:
+    except Exception as e:  # not BaseException: Ctrl-C and SystemExit pass through
         suffix = w.clean_up()
-        if not suffix:
-            raise
-        raise type(e)(f"{e}{suffix}") from e
+        if isinstance(e, GrampsError):
+            if not suffix:
+                raise
+            raise type(e)(f"{e}{suffix}") from e
+        raise GrampsError(f"{type(e).__name__}: {e}{suffix}") from e
     return WriteRecord(at=_now(), objects=w.objects)
 
 

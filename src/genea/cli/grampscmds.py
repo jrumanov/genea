@@ -12,7 +12,7 @@ from genea.changes.export import describe_operation
 from genea.cli import common
 from genea.cli.app import analysis_app, app, gramps_app
 from genea.gramps.client import GrampsClient, GrampsError, _check_url, open_client, tree_for
-from genea.gramps.credentials import CredentialsMissing, store_password
+from genea.gramps.credentials import CredentialsMissing, env_name, store_password
 from genea.gramps.snapshot import SnapshotError, default_runner
 from genea.tools.base import ToolError
 
@@ -40,9 +40,13 @@ def login(ctx: typer.Context, ged_file: str = typer.Argument(..., metavar="GED",
                           TRANSPORT) as client:
             tree = client.login()
             version = client.info()["version"]
-        store_password(user, password)
     except (GrampsError, ImportError) as exc:
         _fail(exc)
+    try:
+        store_password(user, password)
+    except Exception as exc:  # e.g. a keyring backend error; never echo its text, it may hold the password
+        _fail(RuntimeError(f"login ok, but the password could not be stored: {type(exc).__name__}; "
+                           f"set {env_name(user)} instead"))
     common.console.print(f"Logged in as {escape(user)}: tree {escape(tree)}, Gramps Web API {escape(version)}. "
                          f"The password is stored in the keyring.")
 
@@ -127,6 +131,8 @@ def apply(ctx: typer.Context, name: str,
     _print_result(result)
     if result.pr:
         common.console.print("Merge the PR, git pull, then genea index.")
+    if result.failed:
+        raise typer.Exit(1)
 
 
 @analysis_app.command()

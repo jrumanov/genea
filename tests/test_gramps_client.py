@@ -125,3 +125,17 @@ def test_http_url_refused(tmp_path, fake, monkeypatch):
 def test_unmapped_ged_refused():
     with pytest.raises(GrampsError, match=r"\[gramps_web_trees\]"):
         tree_for(Settings(gramps_web_trees={"a.ged": "me"}), "b.ged")
+
+
+def test_login_refuses_missing_tree_claim(tmp_path, fake):
+    fake.omit_tree_claim = True
+    with pytest.raises(WrongTree, match="no tree claim"):
+        GrampsClient("https://gw.test", "me", "pw", tmp_path / "gw.json", fake.transport).login()
+    assert not (tmp_path / "gw.json").exists()
+    assert ("GET", "/api/people/") not in fake.requests
+
+
+def test_non_json_success_body_is_grampserror(client, fake):
+    fake.html_on.add(("GET", "/api/people/"))
+    with pytest.raises(GrampsError, match="not JSON"):
+        client.find_by_gramps_id("people", "I1")

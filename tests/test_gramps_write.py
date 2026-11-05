@@ -212,3 +212,36 @@ def test_transaction_lookup_fails_after_put(client, fake, log):
     assert fake.objects["events"]["e1"]["date"]["dateval"][2] == 1883
     assert record.objects[0].transaction == 0
     assert [(r["method"], r["transaction"]) for r in lines(log)] == [("PUT", None)]
+
+
+def test_non_json_2xx_body_cleans_up_and_names_error(client, fake, log):
+    fake.html_on.add(("PUT", "/api/people/"))  # the PUT is answered 200 with an HTML page
+    with pytest.raises(GrampsError, match=r"not JSON.*\(cleaned up\)"):
+        write(client, add_death(), log)
+    assert set(fake.objects["events"]) == {"e1"}
+
+
+def test_post_response_without_object_is_grampserror(client, fake, log):
+    fake.empty_post_response = True
+    with pytest.raises(GrampsError, match="StopIteration"):
+        write(client, add_death(), log)
+
+
+def test_non_gramps_error_after_put_names_updated_object(client, fake, log):
+    import httpx
+
+    def handler(request):
+        if request.method == "GET" and request.url.path == "/api/people/i2" and ("PUT", "/api/families/f1") in fake.requests:
+            raise RuntimeError("boom")
+        return fake._handle(request)
+
+    c = GrampsClient("https://gw.test", "me", "pw", log.path.parent / "gw2.json", httpx.MockTransport(handler))
+    c.login()
+    with pytest.raises(GrampsError, match=r"RuntimeError: boom.*family F1 already updated"):
+        write(c, link(), log)
+
+
+def test_keyboard_interrupt_is_not_swallowed(client, fake, log, monkeypatch):
+    monkeypatch.setattr(client, "update", lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(KeyboardInterrupt):
+        write(client, add_death(), log)
