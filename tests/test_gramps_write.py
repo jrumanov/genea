@@ -135,7 +135,10 @@ def test_412_marks_stale_and_cleans_up(client, fake, log):
     with pytest.raises(Conflict, match=r"\(cleaned up\)"):
         write(client, add_death(), log)
     assert set(fake.objects["events"]) == {"e1"}
-    assert [(r["method"], r["status"]) for r in lines(log)] == [("POST", 201), ("PUT", 412), ("DELETE", 200)]
+    rows = lines(log)
+    assert [(r["method"], r["status"]) for r in rows] == [("POST", 201), ("PUT", 412), ("DELETE", 200)]
+    assert rows[0]["handle"] == rows[2]["handle"] and rows[1]["path"] == "/api/people/i2"
+    assert fake.objects["people"]["i2"]["event_ref_list"] == []
 
 
 def test_cleanup_failure_names_orphan(client, fake, log):
@@ -150,3 +153,62 @@ def test_no_note_written_into_gramps(client, fake, log):
     write(client, add_death(), log)
     write(client, link(), log)
     assert fake.objects["notes"] == {}
+
+
+def test_failure_log_has_post_put_delete(client, fake, log):
+    fake.fail_on[("PUT", "/api/people/")] = 500
+    with pytest.raises(GrampsError, match=r"500.*\(cleaned up\)"):
+        write(client, add_death(), log)
+    assert [(r["method"], r["path"].split("/")[2], r["status"]) for r in lines(log)] == [
+        ("POST", "events", 201), ("PUT", "people", 500), ("DELETE", "events", 200)]
+
+
+def test_link_child_child_put_fails_names_family(client, fake, log):
+    fake.fail_on[("PUT", "/api/people/")] = 500
+    with pytest.raises(GrampsError, match=r"family F1 already updated; check it in Gramps") as exc:
+        write(client, link(), log)
+    assert "cleaned up" not in str(exc.value)
+    assert fake.objects["families"]["f1"]["child_ref_list"] == [{"_class": "ChildRef", "ref": "i2"}]
+
+
+def test_add_person_update_fails_deletes_both_newest_first(client, fake, log):
+    p = proposal("add_person", {"given": "Eva", "surname": "Weiss", "birth_date": "1900"})
+    fake.fail_on[("PUT", "/api/people/")] = 500
+    with pytest.raises(GrampsError, match=r"\(cleaned up\)$"):
+        write(client, p, log)
+    assert [(r["method"], r["path"].split("/")[2]) for r in lines(log)] == [
+        ("POST", "people"), ("POST", "events"), ("PUT", "people"), ("DELETE", "events"), ("DELETE", "people")]
+    assert set(fake.objects["people"]) == {"i1", "i2"} and set(fake.objects["events"]) == {"e1"}
+
+
+def test_add_person_without_birth(client, fake, log):
+    record = write(client, proposal("add_person", {"given": "Eva", "surname": "Weiss"}), log)
+    assert [(o.kind, o.created) for o in record.objects] == [("people", True)]
+    person = fake.objects["people"][record.objects[0].handle]
+    assert person["gender"] == 2 and not person.get("event_ref_list")
+    assert set(fake.objects["events"]) == {"e1"}
+
+
+def test_get_after_post_fails_object_cleaned_up(client, fake, log):
+    fake.fail_on[("GET", "/api/events/")] = 500  # the gramps_id read right after the POST
+    fake.fail_on[("PUT", "/api/people/")] = 500
+    with pytest.raises(GrampsError, match=r"\(cleaned up\)"):
+        write(client, add_death(), log)
+    assert set(fake.objects["events"]) == {"e1"}
+    assert lines(log)[0]["method"] == "POST" and lines(log)[0]["handle"]
+
+
+def test_orphan_named_by_handle_when_gramps_id_unknown(client, fake, log):
+    fake.fail_on[("GET", "/api/events/")] = 500
+    fake.fail_on[("PUT", "/api/people/")] = 500
+    fake.fail_on[("DELETE", "/api/events/")] = 500
+    with pytest.raises(GrampsError, match=r"orphan events [0-9a-f]{32}"):
+        write(client, add_death(), log)
+
+
+def test_transaction_lookup_fails_after_put(client, fake, log):
+    fake.fail_on[("GET", "/api/transactions/history/objects/Event/")] = 500
+    record = write(client, update_birth(), log)
+    assert fake.objects["events"]["e1"]["date"]["dateval"][2] == 1883
+    assert record.objects[0].transaction == 0
+    assert [(r["method"], r["transaction"]) for r in lines(log)] == [("PUT", None)]

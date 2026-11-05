@@ -15,6 +15,8 @@ from genea.gramps.client import Conflict, GrampsClient, GrampsError
 from genea.gramps.resolve import TAG_TO_GRAMPS, Target
 
 CLASSES = {"people": "Person", "families": "Family", "events": "Event", "notes": "Note", "citations": "Citation"}
+SINGULAR = {"people": "person", "families": "family", "events": "event", "notes": "note",
+            "citations": "citation"}
 GENDERS = {"M": 1, "F": 0, "U": 2}
 _STATUS = re.compile(r": (\d{3})\b")
 
@@ -67,12 +69,11 @@ class _Writer:
         self.client, self.log, self.proposal_id = client, log, proposal_id
         self.objects: list[WrittenObject] = []
 
-    def _done(self, method: str, path: str, status: int, kind: str, handle: str, gramps_id: str | None,
-              changes: list, created: bool) -> None:
-        tid = self.client.latest_transaction(CLASSES[kind], handle)
-        self.log.append(self.proposal_id, method, path, status, handle, gramps_id, tid, changes)
-        self.objects.append(WrittenObject(kind=kind, handle=handle, gramps_id=gramps_id, created=created,
-                                          transaction=tid))
+    def _transaction(self, kind: str, handle: str) -> int | None:
+        try:
+            return self.client.latest_transaction(CLASSES[kind], handle)
+        except GrampsError:
+            return None  # the write itself went through; only its history id is unknown
 
     def create(self, kind: str, obj: dict) -> str:
         path = f"/api/{kind}/"
@@ -82,8 +83,16 @@ class _Writer:
             self.log.append(self.proposal_id, "POST", path, _status(e), None, None, None, None)
             raise
         handle = next(c["handle"] for c in changes if c.get("_class") == CLASSES[kind])
-        stored, _ = self.client.get(kind, handle)
-        self._done("POST", path, 201, kind, handle, stored.get("gramps_id"), changes, True)
+        # tracked before any further request, so clean-up can delete it whatever fails next
+        written = WrittenObject(kind=kind, handle=handle, gramps_id=None, created=True, transaction=0)
+        self.objects.append(written)
+        try:
+            written.gramps_id = self.client.get(kind, handle)[0].get("gramps_id")
+        except GrampsError:
+            pass  # the orphan message then names the handle
+        tid = self._transaction(kind, handle)  # neither lookup raises, so the POST is always logged
+        written.transaction = tid or 0
+        self.log.append(self.proposal_id, "POST", path, 201, handle, written.gramps_id, tid, changes)
         return handle
 
     def update(self, kind: str, obj: dict, etag: str) -> None:
@@ -94,12 +103,18 @@ class _Writer:
         except GrampsError as e:
             self.log.append(self.proposal_id, "PUT", path, _status(e), handle, obj.get("gramps_id"), None, None)
             raise
-        self._done("PUT", path, 200, kind, handle, obj.get("gramps_id"), changes, False)
+        written = WrittenObject(kind=kind, handle=handle, gramps_id=obj.get("gramps_id"), created=False,
+                                transaction=0)
+        self.objects.append(written)
+        tid = self._transaction(kind, handle)
+        written.transaction = tid or 0
+        self.log.append(self.proposal_id, "PUT", path, 200, handle, written.gramps_id, tid, changes)
 
     def clean_up(self) -> str:
         """Delete the objects created for this proposal, newest first; the suffix for the error message."""
         orphans = []
-        for obj in reversed([o for o in self.objects if o.created]):
+        created = [o for o in self.objects if o.created]
+        for obj in reversed(created):
             path = f"/api/{obj.kind}/{obj.handle}"
             try:
                 self.client.delete(obj.kind, obj.handle)
@@ -107,23 +122,33 @@ class _Writer:
                 self.log.append(self.proposal_id, "DELETE", path, _status(e), obj.handle, obj.gramps_id, None, None)
                 orphans.append(f"{obj.kind} {obj.gramps_id or obj.handle}")
                 continue
-            tid = self.client.latest_transaction(CLASSES[obj.kind], obj.handle)
-            self.log.append(self.proposal_id, "DELETE", path, 200, obj.handle, obj.gramps_id, tid, None)
+            self.log.append(self.proposal_id, "DELETE", path, 200, obj.handle, obj.gramps_id,
+                            self._transaction(obj.kind, obj.handle), None)
+        out = ""
         if orphans:
-            return f" (clean-up failed: orphan {', '.join(orphans)}, delete it in Gramps)"
-        return " (cleaned up)"
+            out = f" (clean-up failed: orphan {', '.join(orphans)}, delete it in Gramps)"
+        elif created:
+            out = " (cleaned up)"
+        new = {o.handle for o in created}
+        updated = dict.fromkeys(f"{SINGULAR[o.kind]} {o.gramps_id or o.handle}" for o in self.objects
+                                if not o.created and o.handle not in new)
+        if updated:
+            out += f" ({', '.join(updated)} already updated; check it in Gramps)"
+        return out
 
 
 def write_proposal(client: GrampsClient, target: Target, log: WriteLog) -> WriteRecord:
-    """Raise Conflict (412) or GrampsError after deleting what was created for this proposal."""
+    """Raise Conflict (412) or GrampsError after deleting what was created for this proposal and naming
+    existing objects already updated."""
     p = target.proposal
     w = _Writer(client, log, p.id)
     try:
-        globals()[f"_{p.operation}"](w, target)
+        WRITERS[p.operation](w, target)
     except GrampsError as e:
-        if not any(o.created for o in w.objects):
+        suffix = w.clean_up()
+        if not suffix:
             raise
-        raise type(e)(f"{e}{w.clean_up()}") from e
+        raise type(e)(f"{e}{suffix}") from e
     return WriteRecord(at=_now(), objects=w.objects)
 
 
@@ -185,3 +210,7 @@ def _link_child(w: _Writer, t: Target) -> None:
     if family["handle"] not in (child.get("parent_family_list") or []):
         w.update("people", {**child, "parent_family_list": [*(child.get("parent_family_list") or []),
                                                             family["handle"]]}, child_etag)
+
+
+WRITERS = {"update_event": _update_event, "add_event": _add_event, "add_person": _add_person,
+           "add_note": _add_note, "add_source_citation": _add_source_citation, "link_child": _link_child}
