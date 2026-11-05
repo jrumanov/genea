@@ -94,7 +94,10 @@ class FakeGramps:
 
     def _collection(self, request: httpx.Request, kind: str) -> httpx.Response:
         if request.method == "POST":
-            handle = self.add(kind, json.loads(request.content))
+            obj = json.loads(request.content)
+            if not obj.get("gramps_id"):  # Gramps Web assigns the next id, like Gramps itself
+                obj["gramps_id"] = f"{KINDS[kind][0]}{len(self.objects[kind]) + 1000:04d}"
+            handle = self.add(kind, obj)
             tid = self._record(kind, handle, None, self.objects[kind][handle])
             return self._json(201, [{"type": "add", "handle": handle, "_class": KINDS[kind], "trans_id": tid}])
         params = request.url.params

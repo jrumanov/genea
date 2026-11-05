@@ -37,6 +37,7 @@ class Target:
     place_handle: str | None = None
     source_handle: str | None = None
     gramps_date: dict | None = None
+    child_handle: str | None = None  # link_child: the child has no ETag in reads, the writer reads it fresh
 
 
 def gramps_id(tree_id: str) -> str:
@@ -232,6 +233,7 @@ class Resolver:
         if others:
             raise Stale(f"Gramps has {child_id} in another parent family, the proposal expected none")
         target.reads["family"] = ("families", family, etag)
+        target.child_handle = child["handle"]
 
     def _add_person(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
         pl = p.payload
