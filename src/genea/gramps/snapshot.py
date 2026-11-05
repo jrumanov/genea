@@ -63,11 +63,15 @@ def check_repo(repo: Path, run: Runner = default_runner) -> None:
 
 
 def same_tree(a: bytes, b: bytes) -> bool:
-    """Equal after dropping the 0 HEAD record (it carries export dates)."""
+    """Equal after dropping the 0 HEAD record (it carries export dates).
+
+    Lines are compared as raw bytes, so a line-ending-only or trailing-newline difference
+    counts as a difference: the before commit is made and the diff stays honest.
+    """
 
     def records(data: bytes) -> list[bytes]:
         kept, skipping = [], False
-        for line in data.splitlines():
+        for line in data.splitlines(keepends=True):
             if line.startswith(b"0 "):
                 skipping = line.strip() == b"0 HEAD"
             if not skipping:
@@ -77,16 +81,23 @@ def same_tree(a: bytes, b: bytes) -> bool:
     return records(a) == records(b)
 
 
+def _today() -> str:
+    return date.today().isoformat()
+
+
 def _taken(run: Runner, repo: Path, branch: str) -> bool:
     if run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], repo).returncode == 0:
         return True
     return bool(_ok(run, ["git", "ls-remote", "--heads", "origin", branch], repo).strip())
 
 
-def _write(repo: Path, ged_rel: Path, exports: Exports) -> None:
+def _write(repo: Path, ged_rel: Path, exports: Exports, written: list[str]) -> None:
     (repo / ged_rel).write_bytes(exports.ged)
+    written.append(ged_rel.as_posix())
     if exports.xml is not None:
-        (repo / ged_rel.with_suffix(".gramps")).write_bytes(exports.xml)
+        xml_rel = ged_rel.with_suffix(".gramps")
+        (repo / xml_rel).write_bytes(exports.xml)
+        written.append(xml_rel.as_posix())
 
 
 def _commit(run: Runner, repo: Path, message: str) -> None:
@@ -104,7 +115,7 @@ def open_pr(
     title: str,
     run: Runner = default_runner,
 ) -> str:
-    today = date.today().isoformat()
+    today = _today()
     base = f"genea/{today}-{analysis}"
     branch, n = base, 1
     while _taken(run, repo, branch):
@@ -113,13 +124,14 @@ def open_pr(
     # main is checked out and clean, so its file is the work tree file (read as bytes)
     on_main = (repo / ged_rel).read_bytes() if (repo / ged_rel).exists() else None
     _ok(run, ["git", "checkout", "-b", branch], repo)
+    written: list[str] = []
     try:
         before_line = "The Gramps Web export before genea matched main, so there is no before commit."
         if on_main is None or not same_tree(before.ged, on_main):
-            _write(repo, ged_rel, before)
+            _write(repo, ged_rel, before, written)
             _commit(run, repo, f"Snapshot {today} before genea")
             before_line = "The first commit holds the Gramps Web state before genea (edits made there since the last export)."
-        _write(repo, ged_rel, after)
+        _write(repo, ged_rel, after, written)
         _commit(run, repo, title)
         _ok(run, ["git", "push", "-u", "origin", branch], repo)
         out = _ok(
@@ -132,6 +144,9 @@ def open_pr(
         )
         _ok(run, ["git", "checkout", "main"], repo)
     except Exception as e:
-        run(["git", "checkout", "-f", "main"], repo)
-        raise SnapshotError(f"snapshot failed on branch {branch} (finish it by hand): {e}") from e
+        back = run(["git", "checkout", "-f", "main"], repo)
+        # files written by this call that never got committed would make the next check_repo fail
+        run(["git", "clean", "-f", "--", *written], repo)
+        left = "" if back.returncode == 0 else " (could not switch back to main: run `git checkout -f main`)"
+        raise SnapshotError(f"snapshot failed on branch {branch}, kept for you to finish by hand{left}: {e}") from e
     return out.strip().splitlines()[-1]
