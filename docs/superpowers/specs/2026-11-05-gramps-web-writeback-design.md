@@ -177,11 +177,11 @@ The dead `gedcom_direct_write` setting is removed.
 Gramps handle and id, HTTP status, the changes returned by Gramps Web, and the id of the transaction in
 `/transactions/history/`.
 
-The write responses do not carry the transaction id. genea tags every write with a commit message
-`genea <analysis> <proposal-id>`, then reads `/transactions/history/` with an `after_id` cursor (the newest id
-seen before writing) and records the ids of the entries carrying its message. This needs a Gramps Web API
-release from August 2026 or later (undo endpoint, commit messages, `after_id`); `genea gramps check` and
-`apply` refuse an older server.
+The write responses do not carry the transaction id, and the object endpoints take no commit message (only
+the raw transactions endpoint does). After each request genea reads the object's own history
+(`GET /transactions/history/objects/<class>/<handle>?sort=-id&pagesize=1`) and records that newest id. This
+needs Gramps Web API 3.22.0 (September 2026) or later (undo endpoint, object history); `genea gramps check`
+and `apply` refuse an older server.
 
 `analysis undo` calls `POST /api/transactions/history/<id>/undo` for the proposal's transactions, newest first.
 If Gramps refuses (the object changed since), genea reports it and leaves the proposal `written`; the user
@@ -197,7 +197,8 @@ fixes it in Gramps. The PR history in `fam_tree_ged` is the second safety net: e
   full-fidelity backup (GEDCOM drops some Gramps data). genea's indexer ignores `.gramps` files. (My call.)
 - Branch `genea/<YYYY-MM-DD>-<analysis-name>` with two commits (decided with the user):
   1. **Before**: the exports taken just before the first write, message `Snapshot <date> before genea`. If
-     they equal `main`, this commit is skipped. If not, it holds the user's synced edits that no export
+     the `.ged` equals the one on `main` after its `HEAD` record (which holds the export date), this commit is
+     skipped. If not, it holds the user's synced edits that no export
      recorded, so they are never attributed to genea.
   2. **After**: the exports after the writes, title `genea: <analysis> (<n> changes)`, then per written
      proposal the description, rationale and citations; stale and failed ones listed as not written.
@@ -220,7 +221,8 @@ Gramps Web is on the internet, so:
 - Plain Gramps Web username/password login (decided with the user: no proxy login or OIDC in front).
 - The server runs in multi-tree mode; every tree has its own users, so trees stay fully separated on one host
   (decided with the user). The KB config maps each writable `.ged` to a user, e.g.
-  `[gramps_web.trees] "latest_jrumanovsky.ged" = "genea-jrumanovsky"`. genea always logs in with the user of
+  `[gramps_web_trees] "rodinna historia/fam_tree_ged/latest_jrumanovsky.ged" = "genea-jrumanovsky"` (keys are
+  KB-relative paths, like an analysis' `ged_file`). genea always logs in with the user of
   the `.ged` it writes, and records the tree id from the token on first login. A later login that reaches a
   different tree is refused.
 - Passwords come from the Windows Credential Manager (`keyring`, one entry per user) or an environment
