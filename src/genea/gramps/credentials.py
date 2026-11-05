@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 
-KEYRING_SERVICE = "genea-gramps"
+KEYRING_SERVICE = "genea-gramps-web"
 
 
 class CredentialsMissing(Exception):
