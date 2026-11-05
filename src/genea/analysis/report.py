@@ -20,17 +20,25 @@ def _cites(sources) -> str:
     return ", ".join(s.cite() for s in sources) or "no sources"
 
 
-def _proposal_lines(p: Proposal, hunks: dict[str, list[str]] | None) -> list[str]:
-    lines = [f"  - Proposal **{p.id}** ({p.author}, {p.status}): {describe_operation(p.operation, p.payload)}",
+def _proposal_lines(p: Proposal, hunks: dict[str, list[str]] | None, missing: set[str]) -> list[str]:
+    status = "written, not in the current tree" if p.id in missing else p.status
+    lines = [f"  - Proposal **{p.id}** ({p.author}, {status}): {describe_operation(p.operation, p.payload)}",
              f"    - Why: {p.rationale}", f"    - Evidence: {_cites(p.sources)}"]
     if p.stale_reason:
         lines.append(f"    - Not applied: {p.stale_reason}")
+    if p.status == "failed" and p.error:
+        lines.append(f"    - Not written: {p.error}")
+    if p.written and p.written.pr:
+        lines.append(f"    - Written {p.written.at}, snapshot {p.written.pr}")
     if hunks and hunks.get(p.id):
         lines += ["", "    ```diff", *[f"    {h}" for h in hunks[p.id]], "    ```", ""]
     return lines
 
 
-def render_report(a: Analysis, version: int | None = None, hunks: dict[str, list[str]] | None = None) -> str:
+def render_report(a: Analysis, version: int | None = None, hunks: dict[str, list[str]] | None = None,
+                  missing: set[str] | None = None) -> str:
+    """`missing`: ids of written proposals whose change the indexed tree does not show."""
+    missing = missing or set()
     scope = f"{a.scope.kind} {a.scope.id}"
     if a.scope.kind == "branch":
         scope += f" ({a.scope.direction}, depth {a.scope.depth})"
@@ -66,7 +74,7 @@ def render_report(a: Analysis, version: int | None = None, hunks: dict[str, list
             status += f" ({a.dismissed[f.id]})"
         out.append(f"- [{f.severity}] **{f.id}** {f.kind}: {f.message} {_cites(f.sources)} — {status}")
         for p in by_finding.get(f.id, []):
-            out += _proposal_lines(p, hunks)
+            out += _proposal_lines(p, hunks, missing)
 
     known = {f.id for f in a.findings}
     other = [p for fid, ps in by_finding.items() if fid not in known for p in ps]
@@ -74,7 +82,7 @@ def render_report(a: Analysis, version: int | None = None, hunks: dict[str, list
         out += ["", "## Other proposals", ""]
         for p in other:
             out.append("- free-standing:" if p.finding_id is None else f"- finding {p.finding_id} is no longer reported:")
-            out += _proposal_lines(p, hunks)
+            out += _proposal_lines(p, hunks, missing)
     if a.notes:
         out += ["", "## Notes", ""] + [f"- {n.created}: {n.text}" for n in a.notes]
     return "\n".join(out) + "\n"

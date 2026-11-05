@@ -11,7 +11,7 @@ from datetime import date
 
 from genea.analysis import store
 from genea.analysis.gedwrite import GedEditor, GedWriteError, text_lines
-from genea.analysis.models import Analysis, BuildResult, Finding, Proposal
+from genea.analysis.models import Analysis, BuildResult, Finding, LastBuild, Proposal
 from genea.analysis.report import render_report
 from genea.changes.export import describe_operation
 from genea.ingest.gedcom.parser import GedLine, parse_gedcom
@@ -241,6 +241,7 @@ def build(kb: KnowledgeBase, analysis: Analysis) -> BuildResult:
     store.write_atomic(ged_out, data)
     store.write_atomic(diff_out, _diff(base, data, editor, analysis.ged_file))
     analysis.iterations = version
+    analysis.last_build = LastBuild(version=version, base_hash=digest, proposals=applied)
     store.write_atomic(md_out, render_report(analysis, version, editor.log))
     message = (f"Wrote v{version}: {len(applied)} proposal(s) applied, {len(stale)} stale, {checks} CHECK note(s). "
                "The real tree is unchanged.")

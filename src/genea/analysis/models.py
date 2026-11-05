@@ -68,6 +68,12 @@ class Proposal(BaseModel):
     error: str | None = None
 
 
+class LastBuild(BaseModel):
+    version: int
+    base_hash: str  # sha256 of the real tree the build was made from
+    proposals: list[str]  # ids of the proposals the build applied
+
+
 class AnalysisNote(BaseModel):
     created: str
     text: str
@@ -88,6 +94,7 @@ class Analysis(BaseModel):
     dismissed: dict[str, str] = Field(default_factory=dict)  # finding id -> reason ("" if none given)
     notes: list[AnalysisNote] = Field(default_factory=list)
     iterations: int = 0
+    last_build: LastBuild | None = None
 
     def finding_status(self, finding_id: str) -> str:
         if finding_id in self.dismissed:
@@ -121,6 +128,7 @@ class AnalysisPage(ToolResult):
     findings: list[FindingView]
     proposals: list[Proposal]
     report: str
+    not_in_tree: list[str] = Field(default_factory=list)  # written proposals whose change the index does not show
     message: str | None = None
 
 
