@@ -143,6 +143,33 @@ def _body(analysis: Analysis, written: list[Proposal], stale: dict[str, str], fa
     return "\n".join(out)
 
 
+def _write_all(ctx: ToolContext, analysis: Analysis, plan: Plan, client: GrampsClient, resolver: Resolver,
+               log: WriteLog, new_people: dict[str, str], written: list[Proposal], stale: dict[str, str],
+               failed: dict[str, str]) -> None:
+    for p in sorted(plan.proposals, key=lambda p: p.operation != "add_person"):  # new people first
+        try:
+            record = write_proposal(client, resolver.resolve(p, new_people), log)
+        except Stale as exc:
+            p.status, p.stale_reason, p.error = "stale", str(exc), None
+            stale[p.id] = p.stale_reason
+        except Conflict as exc:
+            if "already updated" in str(exc):  # partly applied: not stale, the user must check it
+                p.status, p.stale_reason, p.error = "failed", None, f"changed in Gramps while writing: {exc}"
+                failed[p.id] = p.error
+            else:
+                p.status, p.stale_reason, p.error = "stale", f"changed in Gramps while writing: {exc}", None
+                stale[p.id] = p.stale_reason
+        except (ValueError, GrampsError) as exc:
+            p.status, p.stale_reason, p.error = "failed", None, str(exc)
+            failed[p.id] = p.error
+        else:
+            p.status, p.stale_reason, p.error, p.written = "written", None, None, record
+            written.append(p)
+            if handle := _created_person(p):
+                new_people[p.id] = handle
+        _save(ctx, analysis)  # after each proposal, so a crash keeps what was written
+
+
 def apply_analysis(ctx: ToolContext, plan: Plan, transport: httpx.BaseTransport | None = None,
                    run: Runner = default_runner) -> ApplyResult:
     analysis = plan.analysis
@@ -161,24 +188,14 @@ def apply_analysis(ctx: ToolContext, plan: Plan, transport: httpx.BaseTransport 
             raise ToolError(f"Nothing was written to Gramps Web: the export failed: {exc}") from exc
         resolver, log = Resolver(client), WriteLog(store.analysis_dir(ctx.kb, analysis.name) / "writes.jsonl")
         new_people = {p.id: h for p in analysis.proposals if (h := _created_person(p))}
-        for p in sorted(plan.proposals, key=lambda p: p.operation != "add_person"):  # new people first
-            try:
-                record = write_proposal(client, resolver.resolve(p, new_people), log)
-            except Stale as exc:
-                p.status, p.stale_reason, p.error = "stale", str(exc), None
-                stale[p.id] = p.stale_reason
-            except Conflict as exc:
-                p.status, p.stale_reason, p.error = "stale", f"changed in Gramps while writing: {exc}", None
-                stale[p.id] = p.stale_reason
-            except (ValueError, GrampsError) as exc:
-                p.status, p.stale_reason, p.error = "failed", None, str(exc)
-                failed[p.id] = p.error
-            else:
-                p.status, p.stale_reason, p.error, p.written = "written", None, None, record
-                written.append(p)
-                if handle := _created_person(p):
-                    new_people[p.id] = handle
-            _save(ctx, analysis)  # after each proposal, so a crash keeps what was written
+        try:
+            _write_all(ctx, analysis, plan, client, resolver, log, new_people, written, stale, failed)
+        except Exception as exc:
+            if not written:
+                raise
+            ids = ", ".join(p.id for p in written)
+            raise ToolError(f"The write stopped ({type(exc).__name__}: {exc}) after {ids} were written to Gramps "
+                            f"Web; they are recorded. Run `genea snapshot {analysis.ged_file}` for the PR.") from exc
         if written:
             title = f"genea: {analysis.name} ({len(written)} changes)"
             try:
@@ -230,13 +247,17 @@ def undo_proposal(ctx: ToolContext, name: str, proposal_id: str, transport: http
         except GrampsError as exc:
             raise ToolError(f"Nothing was undone: the export failed: {exc}") from exc
         done: set[int] = set()
+        total = len({o.transaction for o in p.written.objects})
         for obj in sorted(p.written.objects, key=lambda o: -o.transaction):  # newest first
             if obj.transaction not in done:
                 try:
                     client.undo(obj.transaction)
                 except GrampsError as exc:
-                    failed[p.id] = (f"Gramps refused to undo {_name(obj.kind, obj.gramps_id, obj.handle)} "
-                                    f"({exc}); fix it in Gramps by hand")
+                    what = _name(obj.kind, obj.gramps_id, obj.handle)
+                    failed[p.id] = f"Gramps refused to undo {what} ({exc}); fix it in Gramps by hand"
+                    if undone:
+                        failed[p.id] += (f". {undone} of {total} transaction(s) were undone in Gramps, the rest "
+                                         f"stay; fix {what} in Gramps")
                     break
                 done.add(obj.transaction)
                 undone += 1
@@ -290,7 +311,8 @@ def snapshot_only(ctx: ToolContext, ged_file: str, transport: httpx.BaseTranspor
 
 
 def written_but_missing(ctx: ToolContext, analysis: Analysis, p: Proposal) -> bool:
-    """Whether a written proposal's change is not visible in the indexed tree. False when it cannot be checked."""
+    """Whether a written proposal's change is not visible in the indexed tree (where the index can show it).
+    False when it cannot be checked."""
     if p.status != "written":
         return False
     ged, pl, q = analysis.ged_file, p.payload, ctx.conn.execute

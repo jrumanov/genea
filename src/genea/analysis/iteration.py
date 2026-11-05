@@ -206,7 +206,7 @@ def build(kb: KnowledgeBase, analysis: Analysis) -> BuildResult:
     version = analysis.iterations + 1
     digest = hashlib.sha256(base).hexdigest()
     b = _Builder(editor, analysis.ged_file, version, date.today().isoformat(), digest)
-    candidates = [p for p in analysis.proposals if p.status in ("active", "stale")]
+    candidates = [p for p in analysis.proposals if p.status in ("active", "stale", "failed")]  # failed: retried
 
     taken, n = editor.xrefs(), 0
     for p in candidates:
@@ -224,11 +224,11 @@ def build(kb: KnowledgeBase, analysis: Analysis) -> BuildResult:
             getattr(b, p.operation)(p)
         except (Stale, GedWriteError) as exc:
             editor.restore(snap)
-            p.status, p.stale_reason = "stale", str(exc)
+            p.status, p.stale_reason, p.error = "stale", str(exc), None
             stale.append(p.id)
             b.new_ids.pop(p.id, None)
         else:
-            p.status, p.stale_reason = "active", None
+            p.status, p.stale_reason, p.error = "active", None, None
             applied.append(p.id)
     editor.owner = None
     answered = {p.finding_id for p in analysis.proposals if p.status == "active"}

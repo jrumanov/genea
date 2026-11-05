@@ -49,7 +49,7 @@ def current_state(ctx: ToolContext, analysis: Analysis) -> str:
 
 
 def not_in_tree(ctx: ToolContext, analysis: Analysis) -> set[str]:
-    """Ids of written proposals whose change the indexed tree does not show."""
+    """Ids of written proposals whose change the indexed tree does not show (where the index can show it)."""
     from genea.analysis.apply import written_but_missing  # apply.py imports this module
 
     return {p.id for p in analysis.proposals if written_but_missing(ctx, analysis, p)}

@@ -128,7 +128,7 @@ class AnalysisPage(ToolResult):
     findings: list[FindingView]
     proposals: list[Proposal]
     report: str
-    not_in_tree: list[str] = Field(default_factory=list)  # written proposals whose change the index does not show
+    not_in_tree: list[str] = Field(default_factory=list)  # written proposals whose change the index does not show (where the index can show it)
     message: str | None = None
 
 

@@ -37,7 +37,7 @@ def _proposal_lines(p: Proposal, hunks: dict[str, list[str]] | None, missing: se
 
 def render_report(a: Analysis, version: int | None = None, hunks: dict[str, list[str]] | None = None,
                   missing: set[str] | None = None) -> str:
-    """`missing`: ids of written proposals whose change the indexed tree does not show."""
+    """`missing`: ids of written proposals whose change the indexed tree does not show (where the index can show it)."""
     missing = missing or set()
     scope = f"{a.scope.kind} {a.scope.id}"
     if a.scope.kind == "branch":

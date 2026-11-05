@@ -322,7 +322,7 @@ def test_saved_after_each_proposal(ctx, fake, run):
             raise RuntimeError("crash")
         return fake._handle(request)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ToolError, match=f"after {p1} were written.*genea snapshot {GED}"):
         _apply(ctx, name, fake, run, httpx.MockTransport(handler))
     assert _proposal(ctx, name, p1).status == "written"
     assert _proposal(ctx, name, p2).status == "active"
@@ -420,3 +420,92 @@ def test_snapshot_only(ctx, fake, run, prs, repo):
     prs.clear()
     assert "matches main" in snapshot_only(ctx, GED, fake.transport, run)
     assert prs == []
+
+
+def test_crash_before_anything_written_is_raised_as_is(ctx, fake, run):
+    name = _analysis(ctx)
+    _update(ctx, name, "@I3@", "2 JAN 1878")
+    api.build_iteration(ctx, name)
+
+    def handler(request):
+        if request.method == "PUT":
+            raise RuntimeError("crash")
+        return fake._handle(request)
+
+    with pytest.raises(RuntimeError):
+        _apply(ctx, name, fake, run, httpx.MockTransport(handler))
+
+
+def test_failed_proposal_is_retried_after_rebuild(ctx, fake, run):
+    name = _analysis(ctx)
+    pid = _update(ctx, name, "@I3@", "2 JAN 1878")
+    api.build_iteration(ctx, name)
+    fake.fail_on[("PUT", "/api/events/")] = 500
+    result = _apply(ctx, name, fake, run)
+    assert pid in result.failed and _proposal(ctx, name, pid).status == "failed"
+    built = api.build_iteration(ctx, name)
+    assert pid in built.applied
+    p = _proposal(ctx, name, pid)
+    assert p.status == "active" and p.error is None
+    assert store.load(ctx.kb, name).last_build.proposals == [pid]
+    assert _apply(ctx, name, fake, run).written == [pid]
+    assert _proposal(ctx, name, pid).status == "written"
+
+
+def test_conflict_after_an_update_is_failed_not_stale(ctx, fake, run):
+    name = _analysis(ctx)
+    link = api.propose(ctx, name, "link_child", {"family_id": f"{GED}#@F1@", "child_id": f"{GED}#@I7@"},
+                       CITE, "why").proposal_id
+    api.build_iteration(ctx, name)
+    fake.fail_on[("PUT", "/api/people/")] = 412  # the child's PUT, after the family PUT went through
+    result = _apply(ctx, name, fake, run)
+    assert result.written == [] and link in result.failed and result.stale == {}
+    assert "already updated" in result.failed[link]
+    p = _proposal(ctx, name, link)
+    assert p.status == "failed" and "already updated" in p.error
+
+
+def test_pure_conflict_is_stale(ctx, fake, run):
+    name = _analysis(ctx)
+    pid = _update(ctx, name, "@I3@", "2 JAN 1878")
+    api.build_iteration(ctx, name)
+    fake.fail_on[("PUT", "/api/events/")] = 412
+    result = _apply(ctx, name, fake, run)
+    assert "changed in Gramps while writing" in result.stale[pid]
+
+
+def test_failed_new_person_makes_its_link_stale(ctx, fake, run):
+    name = _analysis(ctx)
+    person, link = _new_child(ctx, name)
+    api.build_iteration(ctx, name)
+    fake.fail_on[("POST", "/api/people/")] = 500
+    result = _apply(ctx, name, fake, run)
+    assert person in result.failed
+    assert result.stale[link] == f"{person} was not written"
+
+
+def test_partial_undo_says_how_many(ctx, fake, run):
+    name = _analysis(ctx)
+    person, _ = _new_child(ctx, name)
+    api.withdraw(ctx, name, "p-2")
+    api.build_iteration(ctx, name)
+    _apply(ctx, name, fake, run)
+    p = _proposal(ctx, name, person)
+    created = next(o.handle for o in p.written.objects if o.kind == "people")
+    newest = max(o.transaction for o in p.written.objects)
+    oldest = min(o.transaction for o in p.written.objects)
+    count = len({o.transaction for o in p.written.objects})
+    real = fake._undo
+
+    def undo(tid):  # the oldest transaction (the person's creation) no longer applies
+        if tid == oldest:
+            return fake._json(409, {"error": {"message": "Object changed"}})
+        return real(tid)
+
+    fake._undo = undo
+    result = undo_proposal(ctx, name, person, fake.transport, run)
+    assert f"{count - 1} of {count} transaction(s) were undone in Gramps, the rest stay" in result.failed[person]
+    assert "fix person" in result.failed[person]
+    assert _proposal(ctx, name, person).status == "written"
+    assert [o.transaction for o in _proposal(ctx, name, person).written.objects] == [oldest]
+    assert created in fake.objects["people"] and newest != oldest
