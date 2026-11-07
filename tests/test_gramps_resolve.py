@@ -85,9 +85,23 @@ def test_missing_person_is_stale(resolver):
         resolver.resolve(p, {})
 
 
-def test_place_must_exist(resolver):
-    p = proposal("add_event", {"person_id": f"{GED}#@I1@", "type": "DEAT", "date": "1950", "place": "Bratislava"})
+def test_place_must_exist_to_update_an_event(resolver):
+    p = update_birth()
+    p.payload["place"] = "Bratislava"
     with pytest.raises(ValueError, match="not in Gramps"):
+        resolver.resolve(p, {})
+
+
+def test_unknown_place_of_a_new_event_is_new(resolver):
+    p = proposal("add_event", {"person_id": f"{GED}#@I1@", "type": "DEAT", "date": "1950", "place": "Bratislava"})
+    t = resolver.resolve(p, {})
+    assert t.new_place == "Bratislava" and t.place_handle is None
+
+
+def test_ambiguous_place_not_created(resolver, fake):
+    fake.add("places", {"handle": "pl2", "gramps_id": "P2", "profile": {"name": "Brno"}})
+    p = proposal("add_event", {"person_id": f"{GED}#@I1@", "type": "DEAT", "date": "1950", "place": "Brno"})
+    with pytest.raises(ValueError, match="not unique"):
         resolver.resolve(p, {})
 
 

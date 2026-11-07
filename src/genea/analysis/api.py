@@ -188,6 +188,8 @@ def _check_ids(ctx: ToolContext, analysis: Analysis, operation: str, payload: di
     if operation == "add_event" and payload.get("person_id") and payload["type"] not in INDIVIDUAL_EVENT_TAGS:
         raise ToolError(f"{payload['type']!r} is not an individual event tag; use one of "
                         f"{', '.join(sorted(INDIVIDUAL_EVENT_TAGS))}.")
+    if operation == "add_event" and payload["type"] == "RESI" and not payload.get("address"):
+        raise ToolError("RESI needs an address (one line), like 'Hlavná 5, Nitra'.")
     if operation == "add_person" and payload.get("sex") not in (None, "", "M", "F", "U"):
         raise ToolError("sex must be M, F or U.")
 

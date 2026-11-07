@@ -13,7 +13,7 @@ from genea.analysis import store
 from genea.analysis.gedwrite import GedEditor, GedWriteError, text_lines
 from genea.analysis.models import Analysis, BuildResult, Finding, LastBuild, Proposal
 from genea.analysis.report import render_report
-from genea.analysis.sourcenote import with_source
+from genea.analysis.sourcenote import event_description, with_source
 from genea.changes.export import describe_operation
 from genea.ingest.gedcom.parser import GedLine, parse_gedcom
 from genea.kb import KnowledgeBase
@@ -71,7 +71,8 @@ class _Builder:
     def add_event(self, p: Proposal) -> None:
         pl = p.payload
         rec = self.record(pl.get("person_id") or pl["family_id"])
-        lines = [f"1 {pl['type']} {pl['description']}" if pl.get("description") else f"1 {pl['type']}"]
+        description = event_description(pl)
+        lines = [f"1 {pl['type']} {description}" if description else f"1 {pl['type']}"]
         if pl.get("date"):
             lines.append(f"2 DATE {pl['date']}")
         if pl.get("place"):

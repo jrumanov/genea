@@ -11,13 +11,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from genea.analysis.models import WriteRecord, WrittenObject
-from genea.analysis.sourcenote import with_source
+from genea.analysis.sourcenote import event_description, with_source
 from genea.gramps.client import Conflict, GrampsClient, GrampsError
 from genea.gramps.resolve import TAG_TO_GRAMPS, Target
 
-CLASSES = {"people": "Person", "families": "Family", "events": "Event", "notes": "Note", "citations": "Citation"}
+CLASSES = {"people": "Person", "families": "Family", "events": "Event", "notes": "Note", "citations": "Citation",
+           "places": "Place"}
 SINGULAR = {"people": "person", "families": "family", "events": "event", "notes": "note",
-            "citations": "citation"}
+            "citations": "citation", "places": "place"}
 GENDERS = {"M": 1, "F": 0, "U": 2}
 _STATUS = re.compile(r": (\d{3})\b")
 
@@ -208,7 +209,11 @@ def _add_event(w: _Writer, t: Target) -> None:
     pl = t.proposal.payload
     type_name = TAG_TO_GRAMPS[pl["type"]]
     notes = [_note(w, with_source(pl["note"], t.proposal.sources))] if pl.get("note") else None
-    handle = w.create("events", _event(type_name, t.gramps_date, t.place_handle, pl.get("description"), notes))
+    place = t.place_handle
+    if t.new_place:
+        place = w.create("places", {"_class": "Place", "title": t.new_place,
+                                    "name": {"_class": "PlaceName", "value": t.new_place}})
+    handle = w.create("events", _event(type_name, t.gramps_date, place, event_description(pl), notes))
     w.update(kind, _add_event_ref(owner, handle, type_name, "Family" if kind == "families" else "Primary"), etag)
 
 

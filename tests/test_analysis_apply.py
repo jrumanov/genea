@@ -526,3 +526,15 @@ def test_partial_undo_says_how_many(ctx, fake, run):
     assert _proposal(ctx, name, person).status == "written"
     assert [o.transaction for o in _proposal(ctx, name, person).written.objects] == [oldest]
     assert created in fake.objects["people"] and newest != oldest
+
+
+def test_second_resi_same_place_reuses(ctx, fake, run):
+    name = _analysis(ctx)
+    for address in ("Hlavná 5, Nitra", "Dlhá 2, Nitra"):
+        api.propose(ctx, name, "add_event", {"person_id": f"{GED}#@I7@", "type": "RESI", "address": address,
+                                             "place": "Nitra"}, CITE, "why")
+    api.build_iteration(ctx, name)
+    start = len(fake.requests)
+    result = _apply(ctx, name, fake, run)
+    assert result.written == ["p-1", "p-2"] and result.stale == {} and result.failed == {}
+    assert [r for r in fake.requests[start:] if r == ("POST", "/api/places/")] == [("POST", "/api/places/")]

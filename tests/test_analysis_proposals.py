@@ -225,3 +225,11 @@ def test_propose_needs_one_owner(actx, name, payload):
 def test_family_event_needs_a_family_tag(actx, name):
     with pytest.raises(ToolError, match="not a family event tag"):
         api.propose(actx, name, "add_event", {"family_id": "tree.ged#@F1@", "type": "BAPM"}, CITE, "why")
+
+
+def test_resi_needs_address(actx, name):
+    with pytest.raises(ToolError, match="RESI needs an address"):
+        api.propose(actx, name, "add_event", {"person_id": "tree.ged#@I3@", "type": "RESI"}, CITE, "why")
+    result = api.propose(actx, name, "add_event", {"person_id": "tree.ged#@I3@", "type": "RESI",
+                                                   "address": "Hlavná 5, Nitra"}, CITE, "why")
+    assert result.status == "active"

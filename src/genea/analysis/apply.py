@@ -165,6 +165,8 @@ def _write_all(ctx: ToolContext, analysis: Analysis, plan: Plan, client: GrampsC
         else:
             p.status, p.stale_reason, p.error, p.written = "written", None, None, record
             written.append(p)
+            if any(o.kind == "places" for o in record.objects):
+                resolver.forget_places()  # the next proposal of this run may use the new place
             if handle := _created_person(p):
                 new_people[p.id] = handle
         _save(ctx, analysis)  # after each proposal, so a crash keeps what was written

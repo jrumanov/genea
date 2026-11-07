@@ -327,3 +327,12 @@ def test_iteration_family_marriage(actx, analysis_kb):
     expected = ["1 MARR", "2 DATE 1 JUN 1877", "2 NOTE Zosobášení v Brne.", "3 CONT", "3 CONT Source: [docs/zapis.txt]",
                 "2 NOTE GENEA v1"]
     assert chr(10).join(expected) in text
+
+
+def test_iteration_resi_description(actx, analysis_kb):
+    name = _family(actx)
+    api.propose(actx, name, "add_event", {"person_id": "tree.ged#@I3@", "type": "RESI", "date": "1900",
+                                          "address": "Hlavná 5, Nitra"}, CITE, "why")
+    result = api.build_iteration(actx, name)
+    text = (analysis_kb.root / result.iteration).read_text(encoding="utf-8")
+    assert "1 RESI Address: Hlavná 5, Nitra\n2 DATE 1900" in text

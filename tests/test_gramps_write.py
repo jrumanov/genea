@@ -294,3 +294,26 @@ def test_write_family_marriage_and_note(client, fake, log):
     [ref] = family["event_ref_list"]
     assert fake.objects["events"][ref["ref"]]["type"]["string"] == "Marriage"
     assert ref["role"]["string"] == "Family" and len(family["note_list"]) == 1
+
+
+def resi(address, pid="p-1"):
+    return proposal("add_event", {"person_id": f"{GED}#@I2@", "type": "RESI", "address": address,
+                                  "place": "Nitra"}, pid=pid)
+
+
+def test_write_resi_new_place(client, fake, log):
+    start = len(fake.requests)
+    write(client, resi("Hlavná 5, Nitra"), log)
+    assert writes_since(fake, start) == [("POST", "/api/places/"), ("POST", "/api/events/"),
+                                         ("PUT", "/api/people/i2")]
+    [place] = [pl for pl in fake.objects["places"].values() if pl["handle"] != "pl1"]
+    assert place["title"] == "Nitra" and place["name"] == {"_class": "PlaceName", "value": "Nitra"}
+    [event] = [e for e in fake.objects["events"].values() if e["handle"] != "e1"]
+    assert event["place"] == place["handle"] and event["description"] == "Address: Hlavná 5, Nitra"
+
+
+def test_failed_resi_deletes_the_new_place(client, fake, log):
+    fake.fail_on[("PUT", "/api/people/")] = 500
+    with pytest.raises(GrampsError, match=r"\(cleaned up\)"):
+        write(client, resi("Hlavná 5, Nitra"), log)
+    assert set(fake.objects["places"]) == {"pl1"}
