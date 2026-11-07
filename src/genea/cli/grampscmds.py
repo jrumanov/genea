@@ -7,7 +7,9 @@ from typing import NoReturn
 import typer
 from rich.markup import escape
 
-from genea.analysis.apply import ApplyResult, Plan, apply_analysis, prepare, snapshot_only, undo_proposal
+from genea.analysis import store
+from genea.analysis.apply import (ApplyResult, Plan, apply_analysis, open_review_pr, prepare, read_review,
+                                  snapshot_only, undo_proposal)
 from genea.changes.export import describe_operation
 from genea.cli import common
 from genea.cli.app import analysis_app, app, gramps_app
@@ -120,6 +122,8 @@ def apply(ctx: typer.Context, name: str,
           dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be written and stop"),
           yes: bool = typer.Option(False, "--yes", help="Do not ask for confirmation")) -> None:
     """Write the active proposals of the last build to Gramps Web and open a snapshot PR."""
+    if _with_tools(ctx, lambda tools: store.load(tools.kb, name).review is not None):
+        _with_tools(ctx, lambda tools: read_review(tools, name, RUNNER))  # the user's edits in the review PR
     plan = _with_tools(ctx, lambda tools: prepare(tools, name, proposal or None, RUNNER))
     _print_plan(plan)
     if dry_run:
@@ -133,6 +137,14 @@ def apply(ctx: typer.Context, name: str,
         common.console.print("Merge the PR, git pull, then genea index.")
     if result.failed:
         raise typer.Exit(1)
+
+
+@analysis_app.command()
+def review(ctx: typer.Context, name: str) -> None:
+    """Open a PR in the tree repo with the proposals to review; apply then reads the PR's final state."""
+    url = _with_tools(ctx, lambda tools: open_review_pr(tools, name, RUNNER))
+    common.console.print(f"Review PR: {escape(url)}")
+    common.console.print(f"Edit it, then run: genea analysis apply {name}")
 
 
 @analysis_app.command()

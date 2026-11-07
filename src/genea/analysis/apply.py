@@ -15,14 +15,15 @@ from pathlib import Path
 import httpx
 
 from genea.analysis import store
-from genea.analysis.api import tree_hash, write_report
-from genea.analysis.models import Analysis, Proposal
+from genea.analysis.api import build_iteration, tree_hash, write_report
+from genea.analysis.bundle import parse_bundle, render_bundle
+from genea.analysis.models import Analysis, Proposal, Review
 from genea.changes.export import describe_operation
 from genea.gramps.client import Conflict, GrampsClient, GrampsError, open_client, tree_for
 from genea.gramps.credentials import CredentialsMissing
 from genea.gramps.resolve import Resolver, Stale
-from genea.gramps.snapshot import (Exports, Runner, SnapshotError, check_repo, default_runner, open_pr, repo_of,
-                                   same_tree)
+from genea.gramps.snapshot import (Exports, Runner, SnapshotError, check_repo, default_runner, open_pr, open_review,
+                                   push_snapshots, read_from_branch, repo_of, same_tree)
 from genea.gramps.write import SINGULAR, WriteLog, write_proposal
 from genea.tools.base import ToolContext, ToolError
 
@@ -207,8 +208,12 @@ def apply_analysis(ctx: ToolContext, plan: Plan, transport: httpx.BaseTransport 
             title = f"genea: {analysis.name} ({len(written)} changes)"
             try:
                 after = _exports(ctx, client)
-                pr = open_pr(plan.repo, plan.ged_rel, analysis.name, before, after,
-                             _body(analysis, written, stale, failed), title, run)
+                if analysis.review is not None:
+                    push_snapshots(plan.repo, plan.ged_rel, analysis.review.branch, before, after, title, run)
+                    pr = analysis.review.pr
+                else:
+                    pr = open_pr(plan.repo, plan.ged_rel, analysis.name, before, after,
+                                 _body(analysis, written, stale, failed), title, run)
             except (GrampsError, SnapshotError) as exc:
                 note = f" The changes are in Gramps Web, but the snapshot PR failed: {exc}"
             else:
@@ -221,7 +226,63 @@ def apply_analysis(ctx: ToolContext, plan: Plan, transport: httpx.BaseTransport 
         message += f" Snapshot PR: {pr}. Merge it, `git pull`, then run `genea index`."
     elif not written:
         message += " Nothing was written, so no snapshot PR was opened."
+    if analysis.review is not None and analysis.review.edited:
+        message += " Edits other than deleting sections and decisions in the review file are not applied."
     return ApplyResult(written=[p.id for p in written], stale=stale, failed=failed, pr=pr, message=message + note)
+
+
+def open_review_pr(ctx: ToolContext, name: str, run: Runner = default_runner) -> str:
+    """Build the iteration, then open a PR in the tree repo holding the bundle to review. Returns its url."""
+    existing = store.load(ctx.kb, name).review
+    if existing is not None:
+        raise ToolError(f"{name} already has a review PR: {existing.pr}")
+    build = build_iteration(ctx, name)
+    analysis = store.load(ctx.kb, name)
+    repo, ged_rel = _repo(ctx, analysis.ged_file, run)
+    bundle_rel = Path("genea-review") / f"{name}.md"
+    diff = (store.analysis_dir(ctx.kb, name) / f"v{build.version}.diff").read_text(encoding="utf-8")
+    active = [p for p in analysis.proposals if p.status == "active"]
+    body = (f"Review of {len(active)} proposed change(s) from {name}. Delete the sections you do not want and "
+            "decide each conflict, then run `genea analysis apply` to write what remains to Gramps Web.")
+    try:
+        branch, pr = open_review(repo, ged_rel, name, bundle_rel, render_bundle(analysis), diff,
+                                 f"genea review: {name}", body, run)
+    except SnapshotError as exc:
+        raise ToolError(f"No review PR was opened: {exc}") from exc
+    analysis.review = Review(branch=branch, pr=pr, file=bundle_rel.as_posix())
+    _save(ctx, analysis)
+    return pr
+
+
+def _normal(text: str) -> str:
+    return "\n".join(line.rstrip() for line in text.splitlines()).strip()
+
+
+def read_review(ctx: ToolContext, name: str, run: Runner = default_runner) -> None:
+    """Read the bundle from the review branch: withdraw the proposals whose section was deleted, take the
+    decisions, and build the iteration again. Nothing changes if the file cannot be read."""
+    analysis = store.load(ctx.kb, name)
+    if analysis.review is None:
+        raise ToolError(f"{name} has no review PR; run `genea analysis review {name}` first.")
+    repo, _ = _repo(ctx, analysis.ged_file, run)
+    try:
+        text = read_from_branch(repo, analysis.review.branch, analysis.review.file, run)
+    except SnapshotError as exc:
+        raise ToolError(f"Could not read the review file: {exc}") from exc
+    kept, decisions = parse_bundle(text, analysis)
+    expected = analysis.model_copy(deep=True)
+    for p in expected.proposals:
+        if p.status == "active" and p.id not in kept:
+            p.status = "withdrawn"
+        if p.id in decisions and p.conflict is not None:
+            p.conflict.decision = decisions[p.id]  # type: ignore[assignment]
+    for p, q in zip(analysis.proposals, expected.proposals, strict=True):
+        p.status = q.status
+        if p.conflict is not None and q.conflict is not None:
+            p.conflict.decision = q.conflict.decision
+    analysis.review.edited = _normal(text) != _normal(render_bundle(expected))
+    _save(ctx, analysis)
+    build_iteration(ctx, name)
 
 
 def _name(kind: str, gramps_id: str | None, handle: str) -> str:

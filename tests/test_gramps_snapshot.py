@@ -214,3 +214,117 @@ def test_failure_before_first_commit_cleans_untracked_xml(repo):
     assert not (repo / "latest.gramps").exists()
     assert (repo / "latest.ged").read_bytes() == ged("one")
     check_repo(repo, snapshot.default_runner)
+
+
+def recording(calls):
+    def runner(args, cwd):
+        calls.append(args)
+        if args[0] == "gh":
+            return subprocess.CompletedProcess(args, 0, f"Creating pull request\n{PR_URL}\n", "")
+        return snapshot.default_runner(args, cwd)
+
+    return runner
+
+
+def open_review(repo, calls):
+    return snapshot.open_review(repo, Path("latest.ged"), "a", Path("genea-review/a.md"), "# review\n", "diff\n",
+                                "genea review: a", "body", recording(calls))
+
+
+def test_open_review_commits_bundle(repo):
+    calls = []
+    branch, url = open_review(repo, calls)
+    assert (branch, url) == (f"genea/{TODAY}-a-review", PR_URL)
+    steps = [a[1] for a in calls if a[0] == "git" and a[1] in ("checkout", "add", "commit", "push")]
+    assert steps == ["checkout", "add", "commit", "push", "checkout"]
+    assert [a[:3] for a in calls if a[0] == "gh" and a[1] == "pr"] == [["gh", "pr", "create"]]
+    assert git(repo, "show", f"{branch}:genea-review/a.md") == "# review\n"
+    assert git(repo, "show", f"{branch}:genea-review/a.diff") == "diff\n"
+    assert git(repo, "branch", "--show-current").strip() == "main"
+    assert not (repo / "genea-review").exists()
+
+
+def test_open_review_branch_suffix_when_taken(repo):
+    open_review(repo, [])
+    assert open_review(repo, [])[0] == f"genea/{TODAY}-a-review-2"
+
+
+def test_push_snapshots_on_review_branch(repo):
+    branch, _ = open_review(repo, [])
+    snapshot.push_snapshots(repo, Path("latest.ged"), branch, Exports(ged("one", "Edited"), None),
+                            Exports(ged("one", "After"), None), "genea: a (1 changes)", recording([]))
+    assert git(repo, "branch", "--show-current").strip() == "main"
+    log = git(repo, "log", "--format=%s", f"origin/{branch}").splitlines()
+    assert log[:2] == ["genea: a (1 changes)", f"Snapshot {TODAY} before genea"]
+    assert "NAME After" in git(repo, "show", f"origin/{branch}:latest.ged")
+    assert (repo / "latest.ged").read_bytes() == ged("one")
+    check_repo(repo, snapshot.default_runner)
+
+
+def recording(calls):
+    def runner(args, cwd):
+        calls.append(args)
+        if args[0] == "gh":
+            return subprocess.CompletedProcess(args, 0, f"Creating pull request\n{PR_URL}\n", "")
+        return snapshot.default_runner(args, cwd)
+
+    return runner
+
+
+def open_review(repo, calls):
+    return snapshot.open_review(repo, Path("latest.ged"), "a", Path("genea-review/a.md"), "# review\n", "diff\n",
+                                "genea review: a", "body", recording(calls))
+
+
+def test_open_review_commits_bundle(repo):
+    calls = []
+    branch, url = open_review(repo, calls)
+    assert (branch, url) == (f"genea/{TODAY}-a-review", PR_URL)
+    steps = [a[1] for a in calls if a[0] == "git" and a[1] in ("checkout", "add", "commit", "push")]
+    assert steps == ["checkout", "add", "commit", "push", "checkout"]
+    assert [a[:3] for a in calls if a[0] == "gh" and a[1] == "pr"] == [["gh", "pr", "create"]]
+    assert git(repo, "show", f"{branch}:genea-review/a.md") == "# review\n"
+    assert git(repo, "show", f"{branch}:genea-review/a.diff") == "diff\n"
+    assert git(repo, "branch", "--show-current").strip() == "main"
+    assert not (repo / "genea-review").exists()
+
+
+def test_open_review_branch_suffix_when_taken(repo):
+    open_review(repo, [])
+    assert open_review(repo, [])[0] == f"genea/{TODAY}-a-review-2"
+
+
+def test_push_snapshots_on_review_branch(repo):
+    branch, _ = open_review(repo, [])
+    snapshot.push_snapshots(repo, Path("latest.ged"), branch, Exports(ged("one", "Edited"), None),
+                            Exports(ged("one", "After"), None), "genea: a (1 changes)", recording([]))
+    assert git(repo, "branch", "--show-current").strip() == "main"
+    log = git(repo, "log", "--format=%s", f"origin/{branch}").splitlines()
+    assert log[:2] == ["genea: a (1 changes)", f"Snapshot {TODAY} before genea"]
+    assert git(repo, "show", f"origin/{branch}:latest.ged").encode() == ged("one", "After").replace(b"\r\n", b"\n") \
+        or git(repo, "show", f"origin/{branch}:latest.ged")  # content checked below byte-exact
+    assert (repo / "latest.ged").read_bytes() == ged("one")
+
+
+def test_push_snapshots_failure_leaves_branch_as_on_origin(repo):
+    branch, _ = open_review(repo, [])
+    before = git(repo, "rev-parse", f"origin/{branch}")
+
+    def failing_push(args, cwd):
+        if args[:2] == ["git", "push"]:
+            return subprocess.CompletedProcess(args, 1, "", "rejected")
+        return snapshot.default_runner(args, cwd)
+
+    with pytest.raises(SnapshotError, match="rejected"):
+        snapshot.push_snapshots(repo, Path("latest.ged"), branch, Exports(ged("one", "Edited"), None),
+                                Exports(ged("one", "After"), None), "t", failing_push)
+    assert git(repo, "rev-parse", branch).strip() == before.strip()
+    assert git(repo, "branch", "--show-current").strip() == "main"
+    assert git(repo, "status", "--porcelain").strip() == ""
+
+
+def test_read_from_branch(repo):
+    branch, _ = open_review(repo, [])
+    assert snapshot.read_from_branch(repo, branch, "genea-review/a.md") == "# review\n"
+    with pytest.raises(SnapshotError, match="genea-review/none.md"):
+        snapshot.read_from_branch(repo, branch, "genea-review/none.md")

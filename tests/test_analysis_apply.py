@@ -552,3 +552,98 @@ def test_prepare_refuses_undecided(ctx, fake, run):
     store.save(ctx.kb, analysis)
     api.build_iteration(ctx, name)
     assert [p.id for p in prepare(ctx, name, run=run).proposals] == [pid]
+
+
+def _open_review(ctx, name, run):
+    from genea.analysis.apply import open_review_pr
+
+    return open_review_pr(ctx, name, run)
+
+
+def _edit_review_branch(repo, analysis, edit):
+    """What the user does in the PR: another commit on the review branch."""
+    git(repo, "checkout", analysis.review.branch)
+    path = repo / analysis.review.file
+    path.write_text(edit(path.read_text(encoding="utf-8")), encoding="utf-8")
+    git(repo, "commit", "-am", "review")
+    git(repo, "push")
+    git(repo, "checkout", "main")
+
+
+def test_open_review_pr_saves_the_review(ctx, repo, run, prs):
+    name = _analysis(ctx)
+    _update(ctx, name, "@I3@", "2 JAN 1878")
+    assert _open_review(ctx, name, run) == PR_URL
+    review = store.load(ctx.kb, name).review
+    assert review.pr == PR_URL and review.file == f"genea-review/{name}.md"
+    assert review.branch.endswith(f"{name}-review")
+    assert "### p-1:" in git(repo, "show", f"{review.branch}:{review.file}")
+    assert len(prs) == 1 and git(repo, "branch", "--show-current").strip() == "main"
+
+
+def test_apply_from_review_withdraws_dropped(ctx, fake, run, repo, prs):
+    from genea.analysis.apply import read_review
+
+    name = _analysis(ctx)
+    first = _update(ctx, name, "@I3@", "2 JAN 1878")
+    second = _update(ctx, name, "@I4@", "2 JUN 1878")
+    _open_review(ctx, name, run)
+
+    def drop_second(text):
+        out, skipping = [], False
+        for line in text.splitlines():
+            if line.startswith("#"):
+                skipping = line.startswith(f"### {second}:")
+            if not skipping:
+                out.append(line)
+        return "\n".join(out) + "\n"
+
+    _edit_review_branch(repo, store.load(ctx.kb, name), drop_second)
+    read_review(ctx, name, run)
+    assert _proposal(ctx, name, second).status == "withdrawn"
+    result = _apply(ctx, name, fake, run)
+    assert result.written == [first] and len(prs) == 1 and result.pr == PR_URL
+    branch = store.load(ctx.kb, name).review.branch
+    assert git(repo, "log", "--format=%s", f"origin/{branch}").splitlines()[0] == "genea: " + name + " (1 changes)"
+    assert _proposal(ctx, name, first).written.pr == PR_URL
+
+
+def test_review_with_other_edits_is_reported(ctx, fake, run, repo):
+    from genea.analysis.apply import read_review
+
+    name = _analysis(ctx)
+    _update(ctx, name, "@I3@", "2 JAN 1878")
+    _open_review(ctx, name, run)
+    _edit_review_branch(repo, store.load(ctx.kb, name), lambda text: text.replace("Why:", "Because:"))
+    read_review(ctx, name, run)
+    assert "not applied" in _apply(ctx, name, fake, run).message
+
+
+def test_read_review_refuses_a_bad_decision_and_writes_nothing(ctx, fake, run, repo):
+    from genea.analysis.apply import read_review
+
+    name = _analysis(ctx)
+    api.propose(ctx, name, "add_event", {"person_id": f"{GED}#@I3@", "type": "BIRT", "date": "2 JAN 1878"},
+                CITE, "why", conflict_line=_line(ctx, "@I3@"))
+    _open_review(ctx, name, run)
+    _edit_review_branch(repo, store.load(ctx.kb, name),
+                        lambda text: text.replace("decision: undecided", "decision: maybe"))
+    with pytest.raises(ToolError, match="maybe"):
+        read_review(ctx, name, run)
+    assert _proposal(ctx, name, "p-1").status == "active"
+    assert not [r for r in fake.requests if r[0] in ("POST", "PUT")]
+
+
+def test_review_decision_replaces(ctx, fake, run, repo):
+    from genea.analysis.apply import read_review
+
+    name = _analysis(ctx)
+    api.propose(ctx, name, "add_event", {"person_id": f"{GED}#@I3@", "type": "BIRT", "date": "2 JAN 1878",
+                                         "place": "Brno"}, CITE, "why", conflict_line=_line(ctx, "@I3@"))
+    _open_review(ctx, name, run)
+    _edit_review_branch(repo, store.load(ctx.kb, name),
+                        lambda text: text.replace("decision: undecided", "decision: replace"))
+    read_review(ctx, name, run)
+    assert _apply(ctx, name, fake, run).written == ["p-1"]
+    old = fake.objects["events"]["e" + "I3BIRT"]
+    assert len(old["note_list"]) == 1

@@ -87,6 +87,14 @@ class AnalysisNote(BaseModel):
     text: str
 
 
+class Review(BaseModel):
+    """The PR in the tree repo where the user reviews the bundle before anything is written."""
+    branch: str
+    pr: str
+    file: str  # repo-relative path of the bundle
+    edited: bool = False  # the file was changed in ways apply does not read
+
+
 class Analysis(BaseModel):
     name: str
     scope: ScopeSpec
@@ -103,6 +111,7 @@ class Analysis(BaseModel):
     notes: list[AnalysisNote] = Field(default_factory=list)
     iterations: int = 0
     last_build: LastBuild | None = None
+    review: Review | None = None
 
     def finding_status(self, finding_id: str) -> str:
         if finding_id in self.dismissed:
