@@ -21,7 +21,9 @@ it whole.
   - Everything else becomes Notes, each with its source included.
   - Family-level facts (marriage, family notes) go on the family object; each
     family member also gets the person process.
-- Every written item carries a citation to its source document.
+- Every written item carries its source as text at the end of a note: a note
+  ends with its source, and an event gets an attached note ending with its
+  source. No Gramps Citation objects are created (user's decision).
 - Conflicts with existing tree values are flagged next to the existing value.
   The user chooses keep, replace, or keep both. A bundle cannot be approved
   while any conflict is undecided.
@@ -62,7 +64,8 @@ it whole.
 - No leads list.
 - No Residence-specific writer; whether the event-type mapping covers RESI
   is unchecked.
-- `add_source_citation` attaches to the owner, not to a newly created event.
+- New events need an attached note carrying the source; `add_event` does not
+  attach notes today.
 - `write.py` clean-up deletes only objects created for the failed proposal;
   already-updated existing records are not reverted. With many items per
   bundle this must be fixed.
@@ -84,9 +87,11 @@ it whole.
   final state.)
 - "Replace" in a conflict: the new value is added and the old one is marked,
   never deleted or edited in place. The old record keeps its citations.
-- Missing place or source: Genea creates the new Residence place or the
-  document's source in the tree. This is new; today the write-back only
-  resolves places and sources by title and never creates them.
+- Missing place: Genea creates the new Residence place in the tree. This is
+  new; today the write-back only resolves places by title and never creates
+  them. (Sources need no creation, since the source is note text.)
+- Sources on events and notes are text at the end of the note, not Gramps
+  citations.
 
 ## Calls made by the author (to check)
 
@@ -100,12 +105,9 @@ it whole.
   validates ids, checks "already written" and writes.
 - The bundle reuses the existing `propose` / `build_iteration` / apply
   format, extended with a conflict-decision field. No new apply path.
-- "Already written" is recognised by a citation to the same source document
-  (file + page) on the same person or event, plus comparison with tree
-  content. No tag is added to Gramps records.
-- A note carries its source as text inside the note (Gramps cannot attach a
-  citation to a note) and a citation on the owning person or family. A new
-  event carries its own citation (this fixes the `add_source_citation` gap).
+- "Already written" is recognised by the same source text (file + page) at
+  the end of a note on the same person, family or event, plus comparison
+  with tree content. No tag is added to Gramps records.
 - Leads: each family member gets their own lead note. A fact about a family
   member that is also being processed is written in that member's own run,
   not duplicated as a lead.
@@ -113,8 +115,8 @@ it whole.
   friends), not only by instruction in the skill.
 - A family run produces one bundle (PR) per member plus one family bundle;
   the family bundle is approved last.
-- Creating a place or source first looks for an existing one by title, so
-  re-runs don't create duplicates.
+- Creating a place first looks for an existing one by title, so re-runs
+  don't create duplicates.
 
 ## Also left to the builder
 
