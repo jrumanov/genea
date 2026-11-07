@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from genea.analysis.models import WriteRecord, WrittenObject
-from genea.analysis.sourcenote import event_description, with_source
+from genea.analysis.sourcenote import event_description, superseded, with_source
 from genea.gramps.client import Conflict, GrampsClient, GrampsError
 from genea.gramps.resolve import TAG_TO_GRAMPS, Target
 
@@ -204,6 +204,16 @@ def _owner(t: Target) -> tuple[str, dict, str]:
     return t.reads.get("person") or t.reads["family"]
 
 
+def _mark_replaced(w: _Writer, t: Target) -> None:
+    """A replace decision: the old event gets a note naming the new value; nothing else of it changes."""
+    if t.old_event is None:
+        return
+    _, event, etag = t.old_event
+    p = t.proposal
+    note = _note(w, superseded(p.operation, p.payload, p.id, p.sources))
+    w.update("events", {**event, "note_list": [*(event.get("note_list") or []), note]}, etag)
+
+
 def _add_event(w: _Writer, t: Target) -> None:
     kind, owner, etag = _owner(t)
     pl = t.proposal.payload
@@ -215,6 +225,7 @@ def _add_event(w: _Writer, t: Target) -> None:
                                     "name": {"_class": "PlaceName", "value": t.new_place}})
     handle = w.create("events", _event(type_name, t.gramps_date, place, event_description(pl), notes))
     w.update(kind, _add_event_ref(owner, handle, type_name, "Family" if kind == "families" else "Primary"), etag)
+    _mark_replaced(w, t)
 
 
 def _add_person(w: _Writer, t: Target) -> None:
@@ -234,6 +245,7 @@ def _add_note(w: _Writer, t: Target) -> None:
     kind, owner, etag = _owner(t)
     note = _note(w, with_source(t.proposal.payload["text"], t.proposal.sources))
     w.update(kind, {**owner, "note_list": [*(owner.get("note_list") or []), note]}, etag)
+    _mark_replaced(w, t)
 
 
 def _add_source_citation(w: _Writer, t: Target) -> None:

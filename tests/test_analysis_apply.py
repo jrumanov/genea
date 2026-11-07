@@ -538,3 +538,17 @@ def test_second_resi_same_place_reuses(ctx, fake, run):
     result = _apply(ctx, name, fake, run)
     assert result.written == ["p-1", "p-2"] and result.stale == {} and result.failed == {}
     assert [r for r in fake.requests[start:] if r == ("POST", "/api/places/")] == [("POST", "/api/places/")]
+
+
+def test_prepare_refuses_undecided(ctx, fake, run):
+    name = _analysis(ctx)
+    pid = api.propose(ctx, name, "add_event", {"person_id": f"{GED}#@I3@", "type": "BIRT", "date": "2 JAN 1878"},
+                      CITE, "why", conflict_line=_line(ctx, "@I3@")).proposal_id
+    api.build_iteration(ctx, name)
+    with pytest.raises(ToolError, match=f"{pid} have an undecided conflict"):
+        prepare(ctx, name, run=run)
+    analysis = store.load(ctx.kb, name)
+    next(p for p in analysis.proposals if p.id == pid).conflict.decision = "both"
+    store.save(ctx.kb, analysis)
+    api.build_iteration(ctx, name)
+    assert [p.id for p in prepare(ctx, name, run=run).proposals] == [pid]

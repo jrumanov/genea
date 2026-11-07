@@ -13,7 +13,7 @@ from genea.analysis import store
 from genea.analysis.gedwrite import GedEditor, GedWriteError, text_lines
 from genea.analysis.models import Analysis, BuildResult, Finding, LastBuild, Proposal
 from genea.analysis.report import render_report
-from genea.analysis.sourcenote import event_description, with_source
+from genea.analysis.sourcenote import event_description, superseded, with_source
 from genea.changes.export import describe_operation
 from genea.ingest.gedcom.parser import GedLine, parse_gedcom
 from genea.kb import KnowledgeBase
@@ -68,9 +68,19 @@ class _Builder:
             text += " Line numbers refer to the base file."
         return _plain(text)
 
+    def mark_replaced(self, rec: int, p: Proposal) -> None:
+        """A replace decision: the old event gets a note naming the new value; it is otherwise untouched.
+        Done before the new lines go in, so both land in the right place when they share an insertion point."""
+        if p.conflict is None or p.conflict.decision != "replace":
+            return
+        event = self._find_event(rec, p, p.anchor or {}, p.conflict.line)
+        self.editor.insert_after(self.editor.subtree_end(event), text_lines(
+            self.lines[event].level + 1, "NOTE", superseded(p.operation, p.payload, p.id, p.sources)))
+
     def add_event(self, p: Proposal) -> None:
         pl = p.payload
         rec = self.record(pl.get("person_id") or pl["family_id"])
+        self.mark_replaced(rec, p)
         description = event_description(pl)
         lines = [f"1 {pl['type']} {description}" if description else f"1 {pl['type']}"]
         if pl.get("date"):
@@ -81,10 +91,10 @@ class _Builder:
             lines += text_lines(2, "NOTE", with_source(pl["note"], p.sources))
         self.editor.insert_after(self.editor.subtree_end(rec), lines + text_lines(2, "NOTE", self.marker(p)))
 
-    def _find_event(self, rec: int, p: Proposal, anchor: dict) -> int:
+    def _find_event(self, rec: int, p: Proposal, anchor: dict, line: int | None = None) -> int:
         """The event the proposal was made for. Its recorded line is trusted only if the event is unique in the
         record, or the tree is exactly the one the proposal was made against; otherwise the proposal is stale."""
-        end, guess = self.editor.subtree_end(rec), int(p.payload["line"]) - 1
+        end, guess = self.editor.subtree_end(rec), int(line if line is not None else p.payload["line"]) - 1
 
         def fits(i: int) -> bool:
             line = self.lines[i]
@@ -126,6 +136,7 @@ class _Builder:
 
     def add_note(self, p: Proposal) -> None:
         rec = self.record(p.payload.get("person_id") or p.payload["family_id"])
+        self.mark_replaced(rec, p)
         lines = text_lines(1, "NOTE", with_source(p.payload["text"], p.sources)) + text_lines(1, "NOTE", self.marker(p))
         self.editor.insert_after(self.editor.subtree_end(rec), lines)
 
@@ -211,6 +222,9 @@ def build(kb: KnowledgeBase, analysis: Analysis) -> BuildResult:
     version = analysis.iterations + 1
     digest = hashlib.sha256(base).hexdigest()
     b = _Builder(editor, analysis.ged_file, version, date.today().isoformat(), digest)
+    for p in analysis.proposals:
+        if p.conflict is not None and p.conflict.decision == "keep" and p.status in ("active", "stale", "failed"):
+            p.status, p.stale_reason, p.error = "withdrawn", None, None  # the tree's value stays
     candidates = [p for p in analysis.proposals if p.status in ("active", "stale", "failed")]  # failed: retried
 
     taken, n = editor.xrefs(), 0

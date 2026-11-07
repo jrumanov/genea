@@ -113,6 +113,11 @@ def prepare(ctx: ToolContext, name: str, only: list[str] | None = None, run: Run
     unknown = [pid for pid in (only or []) if pid not in active]
     if unknown:
         raise ToolError(f"{', '.join(unknown)} is not an active proposal of {name}.")
+    undecided = [p.id for p in analysis.proposals
+                 if p.id in chosen and p.conflict is not None and p.conflict.decision == "undecided"]
+    if undecided:
+        raise ToolError(f"{', '.join(undecided)} have an undecided conflict; decide keep, replace or both in the "
+                        "review PR.")
     if chosen & set(build.proposals) != chosen or (only is None and set(build.proposals) != active):
         raise ToolError(f"The proposals changed after the last analysis build (v{build.version}); run "
                         f"`genea analysis build {name}` again and review it first.")

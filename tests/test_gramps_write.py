@@ -3,7 +3,7 @@ import json
 import pytest
 
 from fixtures.fake_gramps import FakeGramps
-from genea.analysis.models import Proposal, WrittenObject
+from genea.analysis.models import Conflict as Disagreement, Proposal, WrittenObject
 from genea.tools.models import SourceRef
 from genea.gramps.client import Conflict, GrampsClient, GrampsError
 from genea.gramps.dates import to_gramps_date
@@ -317,3 +317,36 @@ def test_failed_resi_deletes_the_new_place(client, fake, log):
     with pytest.raises(GrampsError, match=r"\(cleaned up\)"):
         write(client, resi("Hlavná 5, Nitra"), log)
     assert set(fake.objects["places"]) == {"pl1"}
+
+
+def conflicting_birth(decision):
+    p = proposal("add_event", {"person_id": f"{GED}#@I1@", "type": "BIRT", "date": "1883", "place": "Brno"},
+                 anchor={"type": "BIRT", "description": None, "date": "1881", "place": "Brno"})
+    p.conflict = Disagreement(line=10, existing="BIRT 1881 in Brno", decision=decision)
+    p.sources = [SourceRef(file="docs/a.pdf", page=2)]
+    return p
+
+
+def test_write_replace_marks_old(client, fake, log):
+    write(client, conflicting_birth("replace"), log)
+    old = fake.objects["events"]["e1"]
+    assert old["date"] == to_gramps_date("1881") and len(old["note_list"]) == 1
+    note = fake.objects["notes"][old["note_list"][0]]
+    assert note["text"]["string"] == ("Superseded by BIRT 1883 in Brno (genea, p-1).\n\n"
+                                      "Source: [docs/a.pdf p.2]")
+    assert len(fake.objects["people"]["i1"]["event_ref_list"]) == 2
+
+
+def test_write_both_leaves_old_alone(client, fake, log):
+    write(client, conflicting_birth("both"), log)
+    assert "note_list" not in fake.objects["events"]["e1"] and fake.objects["notes"] == {}
+    assert len(fake.objects["people"]["i1"]["event_ref_list"]) == 2
+
+
+def test_failed_replace_restores_old_event(client, fake, log):
+    fake.fail_on[("PUT", "/api/events/")] = 500
+    with pytest.raises(GrampsError, match=r"\(cleaned up\)"):
+        write(client, conflicting_birth("replace"), log)
+    assert "note_list" not in fake.objects["events"]["e1"]
+    assert fake.objects["people"]["i1"]["event_ref_list"] == [{"ref": "e1"}]
+    assert fake.objects["notes"] == {}

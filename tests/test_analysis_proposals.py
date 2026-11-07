@@ -233,3 +233,20 @@ def test_resi_needs_address(actx, name):
     result = api.propose(actx, name, "add_event", {"person_id": "tree.ged#@I3@", "type": "RESI",
                                                    "address": "Hlavná 5, Nitra"}, CITE, "why")
     assert result.status == "active"
+
+
+def test_propose_conflict_anchored(actx, name):
+    line = event_line(actx, "@I3@", "BIRT")
+    api.propose(actx, name, "add_event", {"person_id": "tree.ged#@I3@", "type": "BIRT", "date": "2 JAN 1878"},
+                CITE, "why", conflict_line=line)
+    [p] = store.load(actx.kb, name).proposals
+    assert p.conflict.line == line and p.conflict.decision == "undecided"
+    assert p.conflict.existing == "BIRT 1 JAN 1878 in Brno"
+    assert p.anchor == {"type": "BIRT", "description": None, "date": "1 JAN 1878", "place": "Brno"}
+
+
+def test_conflict_only_on_events_and_notes(actx, name):
+    line = event_line(actx, "@I3@", "BIRT")
+    with pytest.raises(ToolError, match="conflict_line"):
+        api.propose(actx, name, "update_event", {"person_id": "tree.ged#@I3@", "line": line, "date": "1877"},
+                    CITE, "why", conflict_line=line)

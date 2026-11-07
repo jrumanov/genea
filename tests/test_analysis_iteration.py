@@ -336,3 +336,46 @@ def test_iteration_resi_description(actx, analysis_kb):
     result = api.build_iteration(actx, name)
     text = (analysis_kb.root / result.iteration).read_text(encoding="utf-8")
     assert "1 RESI Address: Hlavná 5, Nitra\n2 DATE 1900" in text
+
+
+def _decide(kb, name, pid, decision):
+    analysis = store.load(kb, name)
+    next(p for p in analysis.proposals if p.id == pid).conflict.decision = decision
+    store.save(kb, analysis)
+
+
+def _conflicting_birth(actx, name):
+    line = event_line(actx, "@I3@", "BIRT")
+    return api.propose(actx, name, "add_event", {"person_id": "tree.ged#@I3@", "type": "BIRT",
+                                                 "date": "2 JAN 1878", "place": "Brno"}, CITE, "why",
+                       conflict_line=line).proposal_id
+
+
+def test_build_keep_skips(actx, analysis_kb):
+    name = _family(actx)
+    pid = _conflicting_birth(actx, name)
+    _decide(analysis_kb, name, pid, "keep")
+    result = api.build_iteration(actx, name)
+    assert result.applied == [] and result.stale == []
+    assert [p.status for p in store.load(analysis_kb, name).proposals] == ["withdrawn"]
+
+
+def test_build_replace_marks_old(actx, analysis_kb):
+    name = _family(actx)
+    pid = _conflicting_birth(actx, name)
+    _decide(analysis_kb, name, pid, "replace")
+    result = api.build_iteration(actx, name)
+    assert result.applied == [pid]
+    text = (analysis_kb.root / result.iteration).read_text(encoding="utf-8")
+    old = text.index("1 BIRT\n2 DATE 1 JAN 1878")
+    marked = text.index("2 NOTE Superseded by BIRT 2 JAN 1878 in Brno (genea, p-1).")
+    assert old < marked < text.index("1 BIRT\n2 DATE 2 JAN 1878")
+    assert "2 DATE 1 JAN 1878\n2 PLAC Brno" in text
+
+
+def test_build_both_adds_without_marking(actx, analysis_kb):
+    name = _family(actx)
+    pid = _conflicting_birth(actx, name)
+    _decide(analysis_kb, name, pid, "both")
+    result = api.build_iteration(actx, name)
+    assert "Superseded" not in (analysis_kb.root / result.iteration).read_text(encoding="utf-8")

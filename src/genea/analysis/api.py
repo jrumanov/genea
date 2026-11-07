@@ -11,7 +11,8 @@ from genea.analysis.detectors import detect
 from genea.analysis.gedwrite import CONC_LIMIT
 from genea.analysis.iteration import build
 from genea.analysis.models import (PAGE_SIZE, SEVERITIES, Analysis, AnalysisList, AnalysisNote, AnalysisPage,
-                                   AnalysisSummary, AnalysisUpdate, BuildResult, FindingView, Proposal, parse_cite)
+                                   AnalysisSummary, AnalysisUpdate, BuildResult, Conflict, FindingView, Proposal,
+                                   parse_cite)
 from genea.analysis.report import STATE_WARNINGS, render_report
 from genea.analysis.scope import resolve_scope
 from genea.changes.store import ChangeError, validate_change
@@ -194,27 +195,41 @@ def _check_ids(ctx: ToolContext, analysis: Analysis, operation: str, payload: di
         raise ToolError("sex must be M, F or U.")
 
 
-def _anchor(ctx: ToolContext, payload: dict[str, Any]) -> dict[str, str | None]:
-    ged, xref = parse_person_id(ctx, payload["person_id"])
+def _event_anchor(ctx: ToolContext, owner: str, value: Any) -> tuple[int, dict[str, str | None]]:
+    """The line number and the event as the index holds it, for an event of `owner` (a person or family id)."""
+    xref = owner.rsplit("#", 1)[-1]
     try:
-        line = int(payload["line"])
+        line = int(value)
     except (TypeError, ValueError):
         raise ToolError("line must be the GEDCOM line number of the event (get_person lists it).") from None
     row = ctx.conn.execute("SELECT type, description, date_raw, place FROM events "
-                           "WHERE ged_file = ? AND owner_xref = ? AND line_no = ?", (ged, xref, line)).fetchone()
+                           "WHERE ged_file = ? AND owner_xref = ? AND line_no = ?",
+                           (owner.rsplit("#", 1)[0], xref, line)).fetchone()
     if row is None:
-        raise ToolError(f"Line {line} is not an event of {payload['person_id']}; get_person lists its events "
-                        "with their lines.")
+        raise ToolError(f"Line {line} is not an event of {owner}; get_person lists its events with their lines.")
+    # empty values are None, as the builder reads them from the tree
+    return line, {"type": row["type"], "description": row["description"] or None, "date": row["date_raw"] or None,
+                  "place": row["place"] or None}
+
+
+def _anchor(ctx: ToolContext, payload: dict[str, Any]) -> dict[str, str | None]:
+    line, anchor = _event_anchor(ctx, payload["person_id"], payload["line"])
     if not payload.get("date") and not payload.get("place"):
         raise ToolError("update_event needs a new date or place.")
     payload["line"] = line
-    # empty values are None, as the builder reads them from the tree
-    return {"type": row["type"], "description": row["description"] or None, "date": row["date_raw"] or None,
-            "place": row["place"] or None}
+    return anchor
+
+
+def _show_existing(anchor: dict[str, str | None]) -> str:
+    text = f"{anchor['type']} {anchor['date'] or 'no date'}"
+    if anchor["place"]:
+        text += f" in {anchor['place']}"
+    return text + (f" ({anchor['description']})" if anchor["description"] else "")
 
 
 def propose(ctx: ToolContext, name: str, operation: str, payload: dict[str, Any], sources: list[str],
-            rationale: str, finding_id: str | None = None, author: str = "user") -> AnalysisUpdate:
+            rationale: str, finding_id: str | None = None, author: str = "user",
+            conflict_line: int | None = None) -> AnalysisUpdate:
     analysis = store.load(ctx.kb, name)
     _require_fresh(ctx, analysis)
     if finding_id is not None and finding_id not in {f.id for f in analysis.findings}:
@@ -235,12 +250,19 @@ def propose(ctx: ToolContext, name: str, operation: str, payload: dict[str, Any]
         raise ToolError(str(exc)) from exc
     _check_ids(ctx, analysis, operation, payload)
     anchor = _anchor(ctx, payload) if operation == "update_event" else None
+    conflict = None
+    if conflict_line is not None:
+        if operation not in ("add_event", "add_note"):
+            raise ToolError("conflict_line only goes with add_event and add_note.")
+        line, anchor = _event_anchor(ctx, payload.get("person_id") or payload["family_id"], conflict_line)
+        conflict = Conflict(line=line, existing=_show_existing(anchor))
     for p in analysis.proposals:
         if p.status in ("active", "stale") and p.operation == operation and p.payload == payload:
             return AnalysisUpdate(name=name, proposal_id=p.id, status=p.status, sources=p.sources,
                                   message=f"An identical proposal already exists ({p.id}); not recorded again.")
     proposal = Proposal(id=f"p-{len(analysis.proposals) + 1}", finding_id=finding_id, author=author,
-                        operation=operation, payload=payload, anchor=anchor, base_hash=analysis.base_hash,
+                        operation=operation, payload=payload, anchor=anchor, conflict=conflict,
+                        base_hash=analysis.base_hash,
                         sources=refs, rationale=rationale.strip(), created=store.now())
     analysis.proposals.append(proposal)
     _save(ctx, analysis)

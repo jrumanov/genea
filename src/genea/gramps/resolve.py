@@ -41,6 +41,7 @@ class Target:
     new_place: str | None = None  # add_event: a place title Gramps does not have yet; the writer creates it
     source_handle: str | None = None
     gramps_date: dict | None = None
+    old_event: tuple[str, dict, str] | None = None  # conflict decided "replace": the event to mark, as (kind, obj, etag)
     child_handle: str | None = None  # link_child: the child has no ETag in reads, the writer reads it fresh
 
 
@@ -196,13 +197,16 @@ class Resolver:
             if target.place_handle is None:
                 target.new_place = place
         getattr(self, f"_{p.operation}")(p, target, new_people)
+        if p.conflict is not None and p.conflict.decision == "replace":
+            owner = (target.reads.get("person") or target.reads["family"])[1]
+            event, etag = self._anchored_event(owner, p.anchor or {})
+            target.old_event = ("events", event, etag)
         return target
 
-    def _update_event(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
-        person, _ = self._read("people", p.payload["person_id"])
-        anchor = p.anchor or {}
+    def _anchored_event(self, owner: dict, anchor: dict) -> tuple[dict, str]:
+        """The one event of `owner` that looks like the anchor, else Stale naming what Gramps has."""
         tag = anchor.get("type") or ""
-        events = self._events(person, _gramps_type(tag))
+        events = self._events(owner, _gramps_type(tag))
         hits = [(e, etag) for e, etag in events
                 if same_date(e.get("date"), anchor.get("date"))
                 and self._place_title(e.get("place")) == (anchor.get("place") or None)
@@ -213,7 +217,11 @@ class Resolver:
             raise Stale(f"Gramps has {now}, the proposal was made against {was}")
         if len(hits) > 1:
             raise Stale(f"{was} is in Gramps more than once")
-        event, etag = hits[0]
+        return hits[0]
+
+    def _update_event(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
+        person, _ = self._read("people", p.payload["person_id"])
+        event, etag = self._anchored_event(person, p.anchor or {})
         target.reads["event"] = ("events", event, etag)
 
     def _owner(self, payload: dict) -> tuple[str, str, dict, str]:
@@ -234,7 +242,8 @@ class Resolver:
                     not description or (event.get("description") or "") == description):
                 if note and self._has_note(event, note):
                     raise Stale(f"already in Gramps: {self._show_event(event)} with this note")
-                raise Stale(f"Gramps already has {self._show_event(event)}, the event this proposal adds")
+                if not p.conflict:  # a conflict is the user deciding to add a value that differs from the tree's
+                    raise Stale(f"Gramps already has {self._show_event(event)}, the event this proposal adds")
         target.reads[key] = (kind, owner, etag)
 
     def _add_note(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
