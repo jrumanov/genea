@@ -163,10 +163,35 @@ def test_failure_log_has_post_put_delete(client, fake, log):
         ("POST", "events", 201), ("PUT", "people", 500), ("DELETE", "events", 200)]
 
 
-def test_link_child_child_put_fails_names_family(client, fake, log):
-    fake.fail_on[("PUT", "/api/people/")] = 500
-    with pytest.raises(GrampsError, match=r"family F1 already updated; check it in Gramps") as exc:
+def test_failed_proposal_restores_updated_family(client, fake, log):
+    fake.fail_on[("PUT", "/api/people/")] = 500  # the child's PUT, after the family PUT went through
+    with pytest.raises(GrampsError, match=r"500.*\(cleaned up\)"):
         write(client, link(), log)
+    assert fake.objects["families"]["f1"]["child_ref_list"] == []
+    assert [(r["method"], r["path"].split("/")[2]) for r in lines(log)][-1] == ("PUT", "families")
+
+
+def _failing_restore(fake, log):
+    import httpx
+
+    puts = []
+
+    def handler(request):
+        if request.method == "PUT" and request.url.path == "/api/families/f1":
+            puts.append(1)
+            if len(puts) == 2:  # the first PUT is the write, the second the restore
+                return httpx.Response(500, json={"error": {"message": "boom"}})
+        return fake._handle(request)
+
+    c = GrampsClient("https://gw.test", "me", "pw", log.path.parent / "gw3.json", httpx.MockTransport(handler))
+    c.login()
+    return c
+
+
+def test_restore_failure_named(client, fake, log):
+    fake.fail_on[("PUT", "/api/people/")] = 500
+    with pytest.raises(GrampsError, match=r"family F1 could not be restored; check it in Gramps") as exc:
+        write(_failing_restore(fake, log), link(), log)
     assert "cleaned up" not in str(exc.value)
     assert fake.objects["families"]["f1"]["child_ref_list"] == [{"_class": "ChildRef", "ref": "i2"}]
 
@@ -237,8 +262,9 @@ def test_non_gramps_error_after_put_names_updated_object(client, fake, log):
 
     c = GrampsClient("https://gw.test", "me", "pw", log.path.parent / "gw2.json", httpx.MockTransport(handler))
     c.login()
-    with pytest.raises(GrampsError, match=r"RuntimeError: boom.*family F1 already updated"):
+    with pytest.raises(GrampsError, match=r"RuntimeError: boom.*\(cleaned up\)"):
         write(c, link(), log)
+    assert fake.objects["families"]["f1"]["child_ref_list"] == []
 
 
 def test_keyboard_interrupt_is_not_swallowed(client, fake, log, monkeypatch):

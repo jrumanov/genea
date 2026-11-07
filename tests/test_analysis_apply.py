@@ -460,17 +460,17 @@ def test_failed_proposal_is_retried_after_rebuild(ctx, fake, run):
     assert _proposal(ctx, name, pid).status == "written"
 
 
-def test_conflict_after_an_update_is_failed_not_stale(ctx, fake, run):
+def test_conflict_after_a_restored_update_is_stale(ctx, fake, run):
     name = _analysis(ctx)
     link = api.propose(ctx, name, "link_child", {"family_id": f"{GED}#@F1@", "child_id": f"{GED}#@I7@"},
                        CITE, "why").proposal_id
     api.build_iteration(ctx, name)
     fake.fail_on[("PUT", "/api/people/")] = 412  # the child's PUT, after the family PUT went through
+    before = list(fake.objects["families"]["hF1"]["child_ref_list"])
     result = _apply(ctx, name, fake, run)
-    assert result.written == [] and link in result.failed and result.stale == {}
-    assert "already updated" in result.failed[link]
-    p = _proposal(ctx, name, link)
-    assert p.status == "failed" and "already updated" in p.error
+    assert result.written == [] and link in result.stale and result.failed == {}
+    assert _proposal(ctx, name, link).status == "stale"
+    assert fake.objects["families"]["hF1"]["child_ref_list"] == before
 
 
 def test_pure_conflict_is_stale(ctx, fake, run):

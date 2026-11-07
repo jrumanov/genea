@@ -68,6 +68,7 @@ class _Writer:
     def __init__(self, client: GrampsClient, log: WriteLog, proposal_id: str):
         self.client, self.log, self.proposal_id = client, log, proposal_id
         self.objects: list[WrittenObject] = []
+        self.originals: list[tuple[str, dict]] = []  # (kind, object as read before its first PUT)
 
     def _transaction(self, kind: str, handle: str) -> int | None:
         try:
@@ -98,11 +99,20 @@ class _Writer:
     def update(self, kind: str, obj: dict, etag: str) -> None:
         handle = obj["handle"]
         path = f"/api/{kind}/{handle}"
+        original = None
+        if not any(o.handle == handle for o in self.objects):  # created here: clean-up deletes it instead
+            try:
+                original = self.client.get(kind, handle)[0]
+            except GrampsError as e:
+                self.log.append(self.proposal_id, "GET", path, _status(e), handle, obj.get("gramps_id"), None, None)
+                raise
         try:
             changes = self.client.update(kind, handle, obj, etag)
         except GrampsError as e:
             self.log.append(self.proposal_id, "PUT", path, _status(e), handle, obj.get("gramps_id"), None, None)
             raise
+        if original is not None:
+            self.originals.append((kind, original))
         written = WrittenObject(kind=kind, handle=handle, gramps_id=obj.get("gramps_id"), created=False,
                                 transaction=0)
         self.objects.append(written)
@@ -111,7 +121,8 @@ class _Writer:
         self.log.append(self.proposal_id, "PUT", path, 200, handle, written.gramps_id, tid, changes)
 
     def clean_up(self) -> str:
-        """Delete the objects created for this proposal, newest first; the suffix for the error message."""
+        """Delete the objects created for this proposal, newest first, then put the updated ones back as they were;
+        the suffix for the error message."""
         orphans = []
         created = [o for o in self.objects if o.created]
         for obj in reversed(created):
@@ -124,22 +135,33 @@ class _Writer:
                 continue
             self.log.append(self.proposal_id, "DELETE", path, 200, obj.handle, obj.gramps_id,
                             self._transaction(obj.kind, obj.handle), None)
+        unrestored = []
+        for kind, original in reversed(self.originals):
+            handle = original["handle"]
+            path = f"/api/{kind}/{handle}"
+            try:
+                _, etag = self.client.get(kind, handle)
+                self.client.update(kind, handle, original, etag)
+            except GrampsError as e:
+                self.log.append(self.proposal_id, "PUT", path, _status(e), handle, original.get("gramps_id"),
+                                None, None)
+                unrestored.append(f"{SINGULAR[kind]} {original.get('gramps_id') or handle}")
+                continue
+            self.log.append(self.proposal_id, "PUT", path, 200, handle, original.get("gramps_id"),
+                            self._transaction(kind, handle), None)
         out = ""
         if orphans:
             out = f" (clean-up failed: orphan {', '.join(orphans)}, delete it in Gramps)"
-        elif created:
+        elif created or (self.originals and not unrestored):
             out = " (cleaned up)"
-        new = {o.handle for o in created}
-        updated = dict.fromkeys(f"{SINGULAR[o.kind]} {o.gramps_id or o.handle}" for o in self.objects
-                                if not o.created and o.handle not in new)
-        if updated:
-            out += f" ({', '.join(updated)} already updated; check it in Gramps)"
+        if unrestored:
+            out += f" ({', '.join(f'{u} could not be restored' for u in unrestored)}; check it in Gramps)"
         return out
 
 
 def write_proposal(client: GrampsClient, target: Target, log: WriteLog) -> WriteRecord:
-    """Raise Conflict (412) or GrampsError after deleting what was created for this proposal and naming
-    existing objects already updated."""
+    """Raise Conflict (412) or GrampsError after deleting what was created for this proposal, restoring what it
+    updated and naming anything that could not be restored."""
     p = target.proposal
     w = _Writer(client, log, p.id)
     try:

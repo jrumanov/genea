@@ -153,7 +153,7 @@ def _write_all(ctx: ToolContext, analysis: Analysis, plan: Plan, client: GrampsC
             p.status, p.stale_reason, p.error = "stale", str(exc), None
             stale[p.id] = p.stale_reason
         except Conflict as exc:
-            if "already updated" in str(exc):  # partly applied: not stale, the user must check it
+            if "could not be restored" in str(exc):  # partly applied: not stale, the user must check it
                 p.status, p.stale_reason, p.error = "failed", None, f"changed in Gramps while writing: {exc}"
                 failed[p.id] = p.error
             else:
