@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from genea.analysis.models import WriteRecord, WrittenObject
+from genea.analysis.sourcenote import with_source
 from genea.gramps.client import Conflict, GrampsClient, GrampsError
 from genea.gramps.resolve import TAG_TO_GRAMPS, Target
 
@@ -47,16 +48,21 @@ def _status(exc: GrampsError) -> int:
     return int(match.group(1)) if match else 0
 
 
-def _event(type_name: str, date: dict | None, place: str | None) -> dict:
+def _event(type_name: str, date: dict | None, place: str | None, description: str | None = None,
+           notes: list[str] | None = None) -> dict:
     out = {"_class": "Event", "type": {"_class": "EventType", "string": type_name}, "place": place or ""}
     if date:
         out["date"] = date
+    if description:
+        out["description"] = description
+    if notes:
+        out["note_list"] = notes
     return out
 
 
-def _add_event_ref(person: dict, event_handle: str, type_name: str) -> dict:
+def _add_event_ref(person: dict, event_handle: str, type_name: str, role: str = "Primary") -> dict:
     person = {**person, "event_ref_list": [*(person.get("event_ref_list") or []), {
-        "_class": "EventRef", "ref": event_handle, "role": {"_class": "EventRoleType", "string": "Primary"}}]}
+        "_class": "EventRef", "ref": event_handle, "role": {"_class": "EventRoleType", "string": role}}]}
     index = len(person["event_ref_list"]) - 1
     for name, key in (("Birth", "birth_ref_index"), ("Death", "death_ref_index")):
         if type_name == name and person.get(key, -1) == -1:
@@ -189,11 +195,21 @@ def _update_event(w: _Writer, t: Target) -> None:
     w.update("events", event, etag)
 
 
+def _note(w: _Writer, text: str) -> str:
+    return w.create("notes", {"_class": "Note", "text": {"_class": "StyledText", "string": text}})
+
+
+def _owner(t: Target) -> tuple[str, dict, str]:
+    return t.reads.get("person") or t.reads["family"]
+
+
 def _add_event(w: _Writer, t: Target) -> None:
-    _, person, etag = t.reads["person"]
-    type_name = TAG_TO_GRAMPS[t.proposal.payload["type"]]
-    handle = w.create("events", _event(type_name, t.gramps_date, t.place_handle))
-    w.update("people", _add_event_ref(person, handle, type_name), etag)
+    kind, owner, etag = _owner(t)
+    pl = t.proposal.payload
+    type_name = TAG_TO_GRAMPS[pl["type"]]
+    notes = [_note(w, with_source(pl["note"], t.proposal.sources))] if pl.get("note") else None
+    handle = w.create("events", _event(type_name, t.gramps_date, t.place_handle, pl.get("description"), notes))
+    w.update(kind, _add_event_ref(owner, handle, type_name, "Family" if kind == "families" else "Primary"), etag)
 
 
 def _add_person(w: _Writer, t: Target) -> None:
@@ -210,10 +226,9 @@ def _add_person(w: _Writer, t: Target) -> None:
 
 
 def _add_note(w: _Writer, t: Target) -> None:
-    _, person, etag = t.reads["person"]
-    note = w.create("notes", {"_class": "Note", "text": {"_class": "StyledText",
-                                                         "string": t.proposal.payload["text"]}})
-    w.update("people", {**person, "note_list": [*(person.get("note_list") or []), note]}, etag)
+    kind, owner, etag = _owner(t)
+    note = _note(w, with_source(t.proposal.payload["text"], t.proposal.sources))
+    w.update(kind, {**owner, "note_list": [*(owner.get("note_list") or []), note]}, etag)
 
 
 def _add_source_citation(w: _Writer, t: Target) -> None:

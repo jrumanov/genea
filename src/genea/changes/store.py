@@ -29,9 +29,9 @@ XMP_FIELDS = frozenset({
 })
 IMAGE_OPERATIONS = ("set_fields", "add_keywords", "remove_keywords")
 GEDCOM_REQUIRED = {
-    "add_event": ("person_id", "type"),
+    "add_event": ("type",),  # plus person_id or family_id, checked by the analysis
     "update_event": ("person_id", "line"),
-    "add_note": ("person_id", "text"),
+    "add_note": ("text",),
     "add_source_citation": ("person_id", "source"),
     "link_child": ("family_id", "child_id"),
     "add_person": ("given", "surname"),

@@ -55,7 +55,7 @@ def test_other_operations(actx, analysis_kb):
     result = api.build_iteration(actx, name)
     assert sorted(result.applied) == ["p-1", "p-2", "p-3", "p-4", "p-5"] and result.stale == []
     text = (analysis_kb.root / result.iteration).read_text(encoding="utf-8")
-    assert "1 NOTE Mlynár\n1 NOTE GENEA v1" in text
+    assert "1 NOTE Mlynár\n2 CONT\n2 CONT Source: [docs/zapis.txt]\n1 NOTE GENEA v1" in text
     assert "1 DEAT\n2 DATE 1910\n2 SOUR Matrika Brno\n2 SOUR Matrika Brno 1850\n3 PAGE f. 12\n2 NOTE GENEA v1" in text
     assert "1 BAPM\n2 DATE 3 JUN 1878\n2 PLAC Brno\n2 NOTE GENEA v1" in text
     assert "0 @GENEA1@ INDI\n1 NAME Mária /Weiss/\n1 SEX F\n1 BIRT\n2 DATE 1883\n1 NOTE GENEA v1" in text
@@ -124,7 +124,7 @@ def test_crlf_and_bom_are_kept(tmp_path):
     ctx.conn.close()
     data = (kb.root / result.iteration).read_bytes()
     assert data.startswith(b"\xef\xbb\xbf") and b"\n" not in data.replace(b"\r\n", b"")
-    assert "1 NOTE Poznámka\r\n1 NOTE GENEA v1".encode() in data
+    assert "1 NOTE Poznámka\r\n2 CONT\r\n2 CONT Source: [docs/zapis.txt]\r\n1 NOTE GENEA v1".encode() in data
 
 
 def test_cp1250_tree(tmp_path):
@@ -315,3 +315,15 @@ def test_failed_link_of_a_new_person_leaves_no_famc(tmp_path):
     text = (kb.root / result.iteration).read_bytes().decode("cp1250")
     assert "0 @GENEA1@ INDI" in text and "FAMC" not in text.split("0 @GENEA1@ INDI")[1]
     assert "CHIL @GENEA1@" not in text
+
+
+def test_iteration_family_marriage(actx, analysis_kb):
+    name = _family(actx)
+    api.propose(actx, name, "add_event", {"family_id": "tree.ged#@F1@", "type": "MARR", "date": "1 JUN 1877",
+                                          "note": "Zosobášení v Brne."}, CITE, "why")
+    result = api.build_iteration(actx, name)
+    assert result.applied == ["p-1"]
+    text = (analysis_kb.root / result.iteration).read_text(encoding="utf-8")
+    expected = ["1 MARR", "2 DATE 1 JUN 1877", "2 NOTE Zosobášení v Brne.", "3 CONT", "3 CONT Source: [docs/zapis.txt]",
+                "2 NOTE GENEA v1"]
+    assert chr(10).join(expected) in text

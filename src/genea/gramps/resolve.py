@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 
 from genea.analysis.models import Proposal
+from genea.analysis.sourcenote import same_note, with_source
 from genea.gramps.client import GrampsClient
 from genea.gramps.dates import same_date, to_gramps_date
 from genea.ingest.gedcom.dates import MONTHS
@@ -17,6 +18,8 @@ TAG_TO_GRAMPS = {
     "EMIG": "Emigration", "IMMI": "Immigration", "NATU": "Naturalization", "CENS": "Census",
     "PROB": "Probate", "WILL": "Will", "GRAD": "Graduation", "RETI": "Retirement", "CONF": "Confirmation",
     "FCOM": "First Communion", "ORDN": "Ordination", "RELI": "Religion",
+    "MARR": "Marriage", "DIV": "Divorce", "ENGA": "Engagement", "MARB": "Marriage Banns",
+    "MARS": "Marriage Settlement",
 }
 _PLACE_ID = re.compile(r"^P\d+$")
 _SOURCE_ID = re.compile(r"^S\d+$")
@@ -144,6 +147,14 @@ class Resolver:
             raise Stale(f"{tree_id} is no longer in Gramps")
         return self.client.get(kind, found["handle"])
 
+    def _has_note(self, owner: dict, text: str) -> bool:
+        """Whether a note on `owner` already says `text` (spacing ignored)."""
+        for handle in owner.get("note_list") or []:
+            note, _ = self.client.get("notes", handle)
+            if same_note((note.get("text") or {}).get("string", ""), text):
+                return True
+        return False
+
     def _events(self, person: dict, gramps_type: str) -> list[tuple[dict, str]]:
         out = []
         for ref in person.get("event_ref_list") or []:
@@ -191,17 +202,31 @@ class Resolver:
         event, etag = hits[0]
         target.reads["event"] = ("events", event, etag)
 
+    def _owner(self, payload: dict) -> tuple[str, str, dict, str]:
+        """(reads key, kind, object, etag) of the person or family an event or note is added to."""
+        if payload.get("family_id"):
+            family, etag = self._read("families", payload["family_id"])
+            return "family", "families", family, etag
+        person, etag = self._read("people", payload["person_id"])
+        return "person", "people", person, etag
+
     def _add_event(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
-        person, etag = self._read("people", p.payload["person_id"])
+        key, kind, owner, etag = self._owner(p.payload)
         tag = p.payload["type"]
-        for event, _ in self._events(person, _gramps_type(tag)):
+        note = with_source(p.payload["note"], p.sources) if p.payload.get("note") else None
+        for event, _ in self._events(owner, _gramps_type(tag)):
             if same_date(event.get("date"), p.payload.get("date")):
+                if note and self._has_note(event, note):
+                    raise Stale(f"already in Gramps: {self._show_event(event)} with this note")
                 raise Stale(f"Gramps already has {self._show_event(event)}, the event this proposal adds")
-        target.reads["person"] = ("people", person, etag)
+        target.reads[key] = (kind, owner, etag)
 
     def _add_note(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
-        person, etag = self._read("people", p.payload["person_id"])
-        target.reads["person"] = ("people", person, etag)
+        key, kind, owner, etag = self._owner(p.payload)
+        if self._has_note(owner, with_source(p.payload["text"], p.sources)):
+            raise Stale(f"already in Gramps: a note on {p.payload.get('person_id') or p.payload['family_id']} "
+                        "with this text")
+        target.reads[key] = (kind, owner, etag)
 
     def _add_source_citation(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
         target.source_handle = self.source_handle(p.payload["source"])

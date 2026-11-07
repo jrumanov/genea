@@ -17,7 +17,7 @@ from genea.analysis.scope import resolve_scope
 from genea.changes.store import ChangeError, validate_change
 from genea.dna.store import citation_exists
 from genea.index.progress import index_state
-from genea.ingest.gedcom.mapper import INDIVIDUAL_EVENT_TAGS
+from genea.ingest.gedcom.mapper import FAMILY_WRITE_TAGS, INDIVIDUAL_EVENT_TAGS
 from genea.tools.base import ToolContext, ToolError, parse_family_id, parse_person_id, person_id
 
 
@@ -144,7 +144,7 @@ def _require_fresh(ctx: ToolContext, analysis: Analysis) -> None:
                         f"{analysis.scope.kind} {analysis.scope.id} first.")
 
 
-MULTILINE = {("add_note", "text"), ("add_source_citation", "source")}  # payload values that may hold line breaks
+MULTILINE = {("add_note", "text"), ("add_event", "note"), ("add_source_citation", "source")}  # payload values that may hold line breaks
 
 
 def _check_ids(ctx: ToolContext, analysis: Analysis, operation: str, payload: dict[str, Any]) -> None:
@@ -160,6 +160,8 @@ def _check_ids(ctx: ToolContext, analysis: Analysis, operation: str, payload: di
             raise ToolError(f"{key} must be one line of text.")
         if len(value) > CONC_LIMIT:
             raise ToolError(f"{key} is longer than {CONC_LIMIT} characters.")
+    if operation in ("add_event", "add_note") and bool(payload.get("person_id")) == bool(payload.get("family_id")):
+        raise ToolError("Give exactly one of person_id or family_id.")
     ged = analysis.ged_file
     for key in ("person_id", "child_id"):
         value = payload.get(key)
@@ -180,7 +182,10 @@ def _check_ids(ctx: ToolContext, analysis: Analysis, operation: str, payload: di
         if file != ged:
             raise ToolError(f"{payload['family_id']} is not in {ged}, the tree of this analysis.")
         payload["family_id"] = person_id(file, xref)
-    if operation == "add_event" and payload["type"] not in INDIVIDUAL_EVENT_TAGS:
+    if operation == "add_event" and payload.get("family_id") and payload["type"] not in FAMILY_WRITE_TAGS:
+        raise ToolError(f"{payload['type']!r} is not a family event tag; use one of "
+                        f"{', '.join(sorted(FAMILY_WRITE_TAGS))}.")
+    if operation == "add_event" and payload.get("person_id") and payload["type"] not in INDIVIDUAL_EVENT_TAGS:
         raise ToolError(f"{payload['type']!r} is not an individual event tag; use one of "
                         f"{', '.join(sorted(INDIVIDUAL_EVENT_TAGS))}.")
     if operation == "add_person" and payload.get("sex") not in (None, "", "M", "F", "U"):

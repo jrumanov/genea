@@ -184,8 +184,10 @@ def build_server(source: ToolContext | IndexGate) -> MCPServer:
                       payload: dict[str, Any], sources: list[str], rationale: str,
                       finding_id: str | None = None) -> str:
         """Record a proposed correction in an analysis, for the user to review; the tree is not changed.
-        payload: add_event {person_id, type, date?, place?}; update_event {person_id, line, date?, place?}
-        (line from get_person); add_note {person_id, text}; add_source_citation {person_id, source, page?,
+        payload: add_event {person_id or family_id (exactly one), type, date?, place?, note?, description?}
+        (family events: MARR, DIV, ENGA, MARB, MARS; note is text that gets its source line);
+        update_event {person_id, line, date?, place?} (line from get_person);
+        add_note {person_id or family_id, text} (its source is added at the end of the text); add_source_citation {person_id, source, page?,
         event_type?}; link_child {family_id, child_id} (child_id may be 'proposal:<id>' of an add_person
         proposal); add_person {given, surname, sex?, birth_date?, birth_place?}. sources are citations copied
         from tool results, like '[docs/matrika.pdf p.3]'."""

@@ -4,6 +4,7 @@ import pytest
 
 from fixtures.fake_gramps import FakeGramps
 from genea.analysis.models import Proposal, WrittenObject
+from genea.tools.models import SourceRef
 from genea.gramps.client import Conflict, GrampsClient, GrampsError
 from genea.gramps.dates import to_gramps_date
 from genea.gramps.resolve import Resolver
@@ -119,9 +120,11 @@ def test_link_child_sets_both_sides(client, fake, log):
 
 
 def test_add_note_and_citation(client, fake, log):
-    write(client, proposal("add_note", {"person_id": f"{GED}#@I1@", "text": "hello"}), log)
+    p = proposal("add_note", {"person_id": f"{GED}#@I1@", "text": "hello"})
+    p.sources = [SourceRef(file="docs/a.pdf")]
+    write(client, p, log)
     note = next(iter(fake.objects["notes"].values()))
-    assert note["text"] == {"_class": "StyledText", "string": "hello"}
+    assert note["text"] == {"_class": "StyledText", "string": "hello\n\nSource: [docs/a.pdf]"}
     assert fake.objects["people"]["i1"]["note_list"] == [note["handle"]]
     write(client, proposal("add_source_citation", {"person_id": f"{GED}#@I1@", "source": "S0", "page": "f. 3",
                                                    "event_type": "BIRT"}, pid="p-2"), log)
@@ -271,3 +274,23 @@ def test_keyboard_interrupt_is_not_swallowed(client, fake, log, monkeypatch):
     monkeypatch.setattr(client, "update", lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))
     with pytest.raises(KeyboardInterrupt):
         write(client, add_death(), log)
+
+
+def test_write_event_with_note(client, fake, log):
+    p = proposal("add_event", {"person_id": f"{GED}#@I2@", "type": "DEAT", "date": "1950", "note": "Zomrela v Brne."})
+    p.sources = [SourceRef(file="docs/matrika.pdf", page=3)]
+    write(client, p, log)
+    [note] = fake.objects["notes"].values()
+    assert note["text"]["string"] == "Zomrela v Brne.\n\nSource: [docs/matrika.pdf p.3]"
+    [event] = [e for e in fake.objects["events"].values() if e["handle"] != "e1"]
+    assert event["note_list"] == [note["handle"]]
+
+
+def test_write_family_marriage_and_note(client, fake, log):
+    marriage = proposal("add_event", {"family_id": f"{GED}#@F1@", "type": "MARR", "date": "1900"})
+    write(client, marriage, log)
+    write(client, proposal("add_note", {"family_id": f"{GED}#@F1@", "text": "Rodina"}, pid="p-2"), log)
+    family = fake.objects["families"]["f1"]
+    [ref] = family["event_ref_list"]
+    assert fake.objects["events"][ref["ref"]]["type"]["string"] == "Marriage"
+    assert ref["role"]["string"] == "Family" and len(family["note_list"]) == 1

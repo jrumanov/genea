@@ -16,12 +16,12 @@ def _xref(ref: str) -> str:
 def describe_operation(op: str, p: dict) -> str:
     """One line describing a GEDCOM operation, for checklists, reports and GENEA notes."""
     if op == "add_event":
-        return f"Add {p['type']} to {p['person_id']}: date {p.get('date') or '—'}, place {p.get('place') or '—'}"
+        return f"Add {p['type']} to {p.get('person_id') or p.get('family_id')}: date {p.get('date') or '—'}, place {p.get('place') or '—'}"
     if op == "update_event":
         updates = ", ".join(f"{k} → {v}" for k, v in p.items() if k not in ("person_id", "line"))
         return f"Update the event on line {p['line']} of {p['person_id']}: {updates}"
     if op == "add_note":
-        return f"Add a note to {p['person_id']}: {p['text']}"
+        return f"Add a note to {p.get('person_id') or p.get('family_id')}: {p['text']}"
     if op == "add_source_citation":
         page = f", page {p['page']}" if p.get("page") else ""
         where = f" ({p['event_type']})" if p.get("event_type") else ""
@@ -56,7 +56,7 @@ def _ged_lines(change: Change, n: int) -> list[str]:
         return lines
     if op == "link_child":
         return [f"0 {_xref(p['family_id'])} FAM", f"1 CHIL {_xref(p['child_id'])}"]
-    lines = [f"0 {_xref(p['person_id'])} INDI"]
+    lines = ([f"0 {_xref(p['family_id'])} FAM"] if p.get("family_id") else [f"0 {_xref(p['person_id'])} INDI"])
     if op == "add_event":
         lines.append(f"1 {p['type']}")
         if p.get("date"):

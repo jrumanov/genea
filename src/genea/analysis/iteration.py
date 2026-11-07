@@ -13,6 +13,7 @@ from genea.analysis import store
 from genea.analysis.gedwrite import GedEditor, GedWriteError, text_lines
 from genea.analysis.models import Analysis, BuildResult, Finding, LastBuild, Proposal
 from genea.analysis.report import render_report
+from genea.analysis.sourcenote import with_source
 from genea.changes.export import describe_operation
 from genea.ingest.gedcom.parser import GedLine, parse_gedcom
 from genea.kb import KnowledgeBase
@@ -68,12 +69,15 @@ class _Builder:
         return _plain(text)
 
     def add_event(self, p: Proposal) -> None:
-        rec = self.record(p.payload["person_id"])
-        lines = [f"1 {p.payload['type']}"]
-        if p.payload.get("date"):
-            lines.append(f"2 DATE {p.payload['date']}")
-        if p.payload.get("place"):
-            lines.append(f"2 PLAC {p.payload['place']}")
+        pl = p.payload
+        rec = self.record(pl.get("person_id") or pl["family_id"])
+        lines = [f"1 {pl['type']} {pl['description']}" if pl.get("description") else f"1 {pl['type']}"]
+        if pl.get("date"):
+            lines.append(f"2 DATE {pl['date']}")
+        if pl.get("place"):
+            lines.append(f"2 PLAC {pl['place']}")
+        if pl.get("note"):
+            lines += text_lines(2, "NOTE", with_source(pl["note"], p.sources))
         self.editor.insert_after(self.editor.subtree_end(rec), lines + text_lines(2, "NOTE", self.marker(p)))
 
     def _find_event(self, rec: int, p: Proposal, anchor: dict) -> int:
@@ -120,8 +124,8 @@ class _Builder:
             self.updated[(event, tag)] = p.id
 
     def add_note(self, p: Proposal) -> None:
-        rec = self.record(p.payload["person_id"])
-        lines = text_lines(1, "NOTE", p.payload["text"]) + text_lines(1, "NOTE", self.marker(p))
+        rec = self.record(p.payload.get("person_id") or p.payload["family_id"])
+        lines = text_lines(1, "NOTE", with_source(p.payload["text"], p.sources)) + text_lines(1, "NOTE", self.marker(p))
         self.editor.insert_after(self.editor.subtree_end(rec), lines)
 
     def add_source_citation(self, p: Proposal) -> None:

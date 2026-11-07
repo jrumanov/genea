@@ -205,3 +205,23 @@ def test_withdraw_refuses_written_proposal(actx, analysis_kb, name):
     store.save(analysis_kb, analysis)
     with pytest.raises(ToolError, match=f"written to Gramps Web.*genea analysis undo {name} {pid}"):
         api.withdraw(actx, name, pid)
+
+
+def test_propose_note_on_family(actx, name):
+    api.propose(actx, name, "add_note", {"family_id": "@F1@", "text": "Svadba v Brne"}, CITE, "why")
+    [p] = store.load(actx.kb, name).proposals
+    assert p.payload == {"family_id": "tree.ged#@F1@", "text": "Svadba v Brne"}
+
+
+@pytest.mark.parametrize("payload", [
+    {"type": "BAPM"},
+    {"person_id": "tree.ged#@I3@", "family_id": "tree.ged#@F1@", "type": "MARR"},
+], ids=["none", "both"])
+def test_propose_needs_one_owner(actx, name, payload):
+    with pytest.raises(ToolError, match="exactly one of person_id or family_id"):
+        api.propose(actx, name, "add_event", payload, CITE, "why")
+
+
+def test_family_event_needs_a_family_tag(actx, name):
+    with pytest.raises(ToolError, match="not a family event tag"):
+        api.propose(actx, name, "add_event", {"family_id": "tree.ged#@F1@", "type": "BAPM"}, CITE, "why")

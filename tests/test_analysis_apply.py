@@ -413,6 +413,15 @@ def test_written_but_missing(ctx, fake, run, repo):
     assert not written_but_missing(ctx, analysis, p)
 
 
+def test_family_proposal_cannot_be_checked_in_the_index(ctx, fake, run):
+    name = _analysis(ctx)
+    pid = api.propose(ctx, name, "add_note", {"family_id": f"{GED}#@F1@", "text": "Rodina"}, CITE, "why").proposal_id
+    api.build_iteration(ctx, name)
+    _apply(ctx, name, fake, run)
+    analysis = store.load(ctx.kb, name)
+    assert not written_but_missing(ctx, analysis, next(x for x in analysis.proposals if x.id == pid))
+
+
 def test_snapshot_only(ctx, fake, run, prs, repo):
     assert snapshot_only(ctx, GED, fake.transport, run).endswith(PR_URL)
     assert prs[-1][prs[-1].index("--title") + 1].endswith(" from Gramps Web")

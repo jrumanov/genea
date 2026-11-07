@@ -316,6 +316,8 @@ def written_but_missing(ctx: ToolContext, analysis: Analysis, p: Proposal) -> bo
     if p.status != "written":
         return False
     ged, pl, q = analysis.ged_file, p.payload, ctx.conn.execute
+    if p.operation in ("add_event", "add_note") and not pl.get("person_id"):
+        return False  # a family's events and notes are not in the index
     if p.operation in ("update_event", "add_event"):
         tag = (p.anchor or {}).get("type") if p.operation == "update_event" else pl.get("type")
         rows = q("SELECT date_raw, place FROM events WHERE ged_file = ? AND owner_xref = ? AND type = ?",
