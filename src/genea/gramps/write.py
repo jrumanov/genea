@@ -11,12 +11,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from genea.analysis.models import WriteRecord, WrittenObject
+from genea.analysis.sourcenote import event_description, superseded, with_source
 from genea.gramps.client import Conflict, GrampsClient, GrampsError
 from genea.gramps.resolve import TAG_TO_GRAMPS, Target
 
-CLASSES = {"people": "Person", "families": "Family", "events": "Event", "notes": "Note", "citations": "Citation"}
+CLASSES = {"people": "Person", "families": "Family", "events": "Event", "notes": "Note", "citations": "Citation",
+           "places": "Place"}
 SINGULAR = {"people": "person", "families": "family", "events": "event", "notes": "note",
-            "citations": "citation"}
+            "citations": "citation", "places": "place"}
 GENDERS = {"M": 1, "F": 0, "U": 2}
 _STATUS = re.compile(r": (\d{3})\b")
 
@@ -47,16 +49,21 @@ def _status(exc: GrampsError) -> int:
     return int(match.group(1)) if match else 0
 
 
-def _event(type_name: str, date: dict | None, place: str | None) -> dict:
+def _event(type_name: str, date: dict | None, place: str | None, description: str | None = None,
+           notes: list[str] | None = None) -> dict:
     out = {"_class": "Event", "type": {"_class": "EventType", "string": type_name}, "place": place or ""}
     if date:
         out["date"] = date
+    if description:
+        out["description"] = description
+    if notes:
+        out["note_list"] = notes
     return out
 
 
-def _add_event_ref(person: dict, event_handle: str, type_name: str) -> dict:
+def _add_event_ref(person: dict, event_handle: str, type_name: str, role: str = "Primary") -> dict:
     person = {**person, "event_ref_list": [*(person.get("event_ref_list") or []), {
-        "_class": "EventRef", "ref": event_handle, "role": {"_class": "EventRoleType", "string": "Primary"}}]}
+        "_class": "EventRef", "ref": event_handle, "role": {"_class": "EventRoleType", "string": role}}]}
     index = len(person["event_ref_list"]) - 1
     for name, key in (("Birth", "birth_ref_index"), ("Death", "death_ref_index")):
         if type_name == name and person.get(key, -1) == -1:
@@ -68,6 +75,7 @@ class _Writer:
     def __init__(self, client: GrampsClient, log: WriteLog, proposal_id: str):
         self.client, self.log, self.proposal_id = client, log, proposal_id
         self.objects: list[WrittenObject] = []
+        self.originals: list[tuple[str, dict]] = []  # (kind, object as read before its first PUT)
 
     def _transaction(self, kind: str, handle: str) -> int | None:
         try:
@@ -98,11 +106,20 @@ class _Writer:
     def update(self, kind: str, obj: dict, etag: str) -> None:
         handle = obj["handle"]
         path = f"/api/{kind}/{handle}"
+        original = None
+        if not any(o.handle == handle for o in self.objects):  # created here: clean-up deletes it instead
+            try:
+                original = self.client.get(kind, handle)[0]
+            except GrampsError as e:
+                self.log.append(self.proposal_id, "GET", path, _status(e), handle, obj.get("gramps_id"), None, None)
+                raise
         try:
             changes = self.client.update(kind, handle, obj, etag)
         except GrampsError as e:
             self.log.append(self.proposal_id, "PUT", path, _status(e), handle, obj.get("gramps_id"), None, None)
             raise
+        if original is not None:
+            self.originals.append((kind, original))
         written = WrittenObject(kind=kind, handle=handle, gramps_id=obj.get("gramps_id"), created=False,
                                 transaction=0)
         self.objects.append(written)
@@ -111,7 +128,8 @@ class _Writer:
         self.log.append(self.proposal_id, "PUT", path, 200, handle, written.gramps_id, tid, changes)
 
     def clean_up(self) -> str:
-        """Delete the objects created for this proposal, newest first; the suffix for the error message."""
+        """Delete the objects created for this proposal, newest first, then put the updated ones back as they were;
+        the suffix for the error message."""
         orphans = []
         created = [o for o in self.objects if o.created]
         for obj in reversed(created):
@@ -124,22 +142,33 @@ class _Writer:
                 continue
             self.log.append(self.proposal_id, "DELETE", path, 200, obj.handle, obj.gramps_id,
                             self._transaction(obj.kind, obj.handle), None)
+        unrestored = []
+        for kind, original in reversed(self.originals):
+            handle = original["handle"]
+            path = f"/api/{kind}/{handle}"
+            try:
+                _, etag = self.client.get(kind, handle)
+                self.client.update(kind, handle, original, etag)
+            except GrampsError as e:
+                self.log.append(self.proposal_id, "PUT", path, _status(e), handle, original.get("gramps_id"),
+                                None, None)
+                unrestored.append(f"{SINGULAR[kind]} {original.get('gramps_id') or handle}")
+                continue
+            self.log.append(self.proposal_id, "PUT", path, 200, handle, original.get("gramps_id"),
+                            self._transaction(kind, handle), None)
         out = ""
         if orphans:
             out = f" (clean-up failed: orphan {', '.join(orphans)}, delete it in Gramps)"
-        elif created:
+        elif created or (self.originals and not unrestored):
             out = " (cleaned up)"
-        new = {o.handle for o in created}
-        updated = dict.fromkeys(f"{SINGULAR[o.kind]} {o.gramps_id or o.handle}" for o in self.objects
-                                if not o.created and o.handle not in new)
-        if updated:
-            out += f" ({', '.join(updated)} already updated; check it in Gramps)"
+        if unrestored:
+            out += f" ({', '.join(f'{u} could not be restored' for u in unrestored)}; check it in Gramps)"
         return out
 
 
 def write_proposal(client: GrampsClient, target: Target, log: WriteLog) -> WriteRecord:
-    """Raise Conflict (412) or GrampsError after deleting what was created for this proposal and naming
-    existing objects already updated."""
+    """Raise Conflict (412) or GrampsError after deleting what was created for this proposal, restoring what it
+    updated and naming anything that could not be restored."""
     p = target.proposal
     w = _Writer(client, log, p.id)
     try:
@@ -167,11 +196,36 @@ def _update_event(w: _Writer, t: Target) -> None:
     w.update("events", event, etag)
 
 
+def _note(w: _Writer, text: str) -> str:
+    return w.create("notes", {"_class": "Note", "text": {"_class": "StyledText", "string": text}})
+
+
+def _owner(t: Target) -> tuple[str, dict, str]:
+    return t.reads.get("person") or t.reads["family"]
+
+
+def _mark_replaced(w: _Writer, t: Target) -> None:
+    """A replace decision: the old event gets a note naming the new value; nothing else of it changes."""
+    if t.old_event is None:
+        return
+    _, event, etag = t.old_event
+    p = t.proposal
+    note = _note(w, superseded(p.operation, p.payload, p.id, p.sources))
+    w.update("events", {**event, "note_list": [*(event.get("note_list") or []), note]}, etag)
+
+
 def _add_event(w: _Writer, t: Target) -> None:
-    _, person, etag = t.reads["person"]
-    type_name = TAG_TO_GRAMPS[t.proposal.payload["type"]]
-    handle = w.create("events", _event(type_name, t.gramps_date, t.place_handle))
-    w.update("people", _add_event_ref(person, handle, type_name), etag)
+    kind, owner, etag = _owner(t)
+    pl = t.proposal.payload
+    type_name = TAG_TO_GRAMPS[pl["type"]]
+    notes = [_note(w, with_source(pl["note"], t.proposal.sources))] if pl.get("note") else None
+    place = t.place_handle
+    if t.new_place:
+        place = w.create("places", {"_class": "Place", "title": t.new_place,
+                                    "name": {"_class": "PlaceName", "value": t.new_place}})
+    handle = w.create("events", _event(type_name, t.gramps_date, place, event_description(pl), notes))
+    w.update(kind, _add_event_ref(owner, handle, type_name, "Family" if kind == "families" else "Primary"), etag)
+    _mark_replaced(w, t)
 
 
 def _add_person(w: _Writer, t: Target) -> None:
@@ -188,10 +242,10 @@ def _add_person(w: _Writer, t: Target) -> None:
 
 
 def _add_note(w: _Writer, t: Target) -> None:
-    _, person, etag = t.reads["person"]
-    note = w.create("notes", {"_class": "Note", "text": {"_class": "StyledText",
-                                                         "string": t.proposal.payload["text"]}})
-    w.update("people", {**person, "note_list": [*(person.get("note_list") or []), note]}, etag)
+    kind, owner, etag = _owner(t)
+    note = _note(w, with_source(t.proposal.payload["text"], t.proposal.sources))
+    w.update(kind, {**owner, "note_list": [*(owner.get("note_list") or []), note]}, etag)
+    _mark_replaced(w, t)
 
 
 def _add_source_citation(w: _Writer, t: Target) -> None:

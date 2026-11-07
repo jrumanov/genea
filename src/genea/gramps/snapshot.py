@@ -150,3 +150,85 @@ def open_pr(
         left = "" if back.returncode == 0 else " (could not switch back to main: run `git checkout -f main`)"
         raise SnapshotError(f"snapshot failed on branch {branch}, kept for you to finish by hand{left}: {e}") from e
     return out.strip().splitlines()[-1]
+
+
+def _free_branch(run: Runner, repo: Path, base: str) -> str:
+    branch, n = base, 1
+    while _taken(run, repo, branch):
+        n += 1
+        branch = f"{base}-{n}"
+    return branch
+
+
+def _back_to_main(run: Runner, repo: Path, written: list[str], branch: str, why: Exception,
+                  kept: str) -> SnapshotError:
+    back = run(["git", "checkout", "-f", "main"], repo)
+    run(["git", "clean", "-f", "--", *written], repo)
+    left = "" if back.returncode == 0 else " (could not switch back to main: run `git checkout -f main`)"
+    return SnapshotError(f"{kept} {branch}{left}: {why}")
+
+
+def open_review(
+    repo: Path,
+    ged_rel: Path,
+    analysis: str,
+    bundle_rel: Path,
+    bundle_text: str,
+    diff_text: str,
+    title: str,
+    body: str,
+    run: Runner = default_runner,
+) -> tuple[str, str]:
+    """Commit the review bundle and the iteration diff on a new branch, open a PR, return (branch, PR url)."""
+    branch = _free_branch(run, repo, f"genea/{_today()}-{analysis}-review")
+    _ok(run, ["git", "checkout", "-b", branch], repo)
+    written: list[str] = []
+    try:
+        for rel, text in ((bundle_rel, bundle_text), (bundle_rel.with_suffix(".diff"), diff_text)):
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_bytes(text.encode("utf-8"))
+            written.append(rel.as_posix())
+        _commit(run, repo, title)
+        _ok(run, ["git", "push", "-u", "origin", branch], repo)
+        out = _ok(run, ["gh", "pr", "create", "--base", "main", "--head", branch, "--title", title,
+                        "--body", f"{body}\n\nTree: {ged_rel.as_posix()}"], repo)
+        _ok(run, ["git", "checkout", "main"], repo)
+    except Exception as e:
+        raise _back_to_main(run, repo, written, branch, e, "review PR failed on branch") from e
+    return branch, out.strip().splitlines()[-1]
+
+
+def push_snapshots(
+    repo: Path,
+    ged_rel: Path,
+    branch: str,
+    before: Exports,
+    after: Exports,
+    title: str,
+    run: Runner = default_runner,
+) -> None:
+    """Add the before (if it differs from main) and after snapshot commits to an existing review branch."""
+    on_main = (repo / ged_rel).read_bytes() if (repo / ged_rel).exists() else None
+    _ok(run, ["git", "fetch", "origin"], repo)
+    if run(["git", "checkout", branch], repo).returncode != 0:
+        _ok(run, ["git", "checkout", "-b", branch, f"origin/{branch}"], repo)
+    written: list[str] = []
+    try:
+        _ok(run, ["git", "merge", "--ff-only", f"origin/{branch}"], repo)
+        if on_main is None or not same_tree(before.ged, on_main):
+            _write(repo, ged_rel, before, written)
+            _commit(run, repo, f"Snapshot {_today()} before genea")
+        _write(repo, ged_rel, after, written)
+        _commit(run, repo, title)
+        _ok(run, ["git", "push", "origin", branch], repo)
+        _ok(run, ["git", "checkout", "main"], repo)
+    except Exception as e:
+        err = _back_to_main(run, repo, written, branch, e, "snapshot failed on branch")
+        run(["git", "branch", "-f", branch, f"origin/{branch}"], repo)  # drop commits that were never pushed
+        raise err from e
+
+
+def read_from_branch(repo: Path, branch: str, rel: str, run: Runner = default_runner) -> str:
+    """The text of a file as it is on origin/<branch> now."""
+    _ok(run, ["git", "fetch", "origin"], repo)
+    return _ok(run, ["git", "show", f"origin/{branch}:{rel}"], repo)

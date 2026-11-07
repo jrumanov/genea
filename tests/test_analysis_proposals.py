@@ -205,3 +205,48 @@ def test_withdraw_refuses_written_proposal(actx, analysis_kb, name):
     store.save(analysis_kb, analysis)
     with pytest.raises(ToolError, match=f"written to Gramps Web.*genea analysis undo {name} {pid}"):
         api.withdraw(actx, name, pid)
+
+
+def test_propose_note_on_family(actx, name):
+    api.propose(actx, name, "add_note", {"family_id": "@F1@", "text": "Svadba v Brne"}, CITE, "why")
+    [p] = store.load(actx.kb, name).proposals
+    assert p.payload == {"family_id": "tree.ged#@F1@", "text": "Svadba v Brne"}
+
+
+@pytest.mark.parametrize("payload", [
+    {"type": "BAPM"},
+    {"person_id": "tree.ged#@I3@", "family_id": "tree.ged#@F1@", "type": "MARR"},
+], ids=["none", "both"])
+def test_propose_needs_one_owner(actx, name, payload):
+    with pytest.raises(ToolError, match="exactly one of person_id or family_id"):
+        api.propose(actx, name, "add_event", payload, CITE, "why")
+
+
+def test_family_event_needs_a_family_tag(actx, name):
+    with pytest.raises(ToolError, match="not a family event tag"):
+        api.propose(actx, name, "add_event", {"family_id": "tree.ged#@F1@", "type": "BAPM"}, CITE, "why")
+
+
+def test_resi_needs_address(actx, name):
+    with pytest.raises(ToolError, match="RESI needs an address"):
+        api.propose(actx, name, "add_event", {"person_id": "tree.ged#@I3@", "type": "RESI"}, CITE, "why")
+    result = api.propose(actx, name, "add_event", {"person_id": "tree.ged#@I3@", "type": "RESI",
+                                                   "address": "Hlavná 5, Nitra"}, CITE, "why")
+    assert result.status == "active"
+
+
+def test_propose_conflict_anchored(actx, name):
+    line = event_line(actx, "@I3@", "BIRT")
+    api.propose(actx, name, "add_event", {"person_id": "tree.ged#@I3@", "type": "BIRT", "date": "2 JAN 1878"},
+                CITE, "why", conflict_line=line)
+    [p] = store.load(actx.kb, name).proposals
+    assert p.conflict.line == line and p.conflict.decision == "undecided"
+    assert p.conflict.existing == "BIRT 1 JAN 1878 in Brno"
+    assert p.anchor == {"type": "BIRT", "description": None, "date": "1 JAN 1878", "place": "Brno"}
+
+
+def test_conflict_only_on_events_and_notes(actx, name):
+    line = event_line(actx, "@I3@", "BIRT")
+    with pytest.raises(ToolError, match="conflict_line"):
+        api.propose(actx, name, "update_event", {"person_id": "tree.ged#@I3@", "line": line, "date": "1877"},
+                    CITE, "why", conflict_line=line)

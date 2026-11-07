@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 
 from genea.analysis.models import Proposal
+from genea.analysis.sourcenote import event_description, same_note, with_source
 from genea.gramps.client import GrampsClient
 from genea.gramps.dates import same_date, to_gramps_date
 from genea.ingest.gedcom.dates import MONTHS
@@ -17,6 +18,8 @@ TAG_TO_GRAMPS = {
     "EMIG": "Emigration", "IMMI": "Immigration", "NATU": "Naturalization", "CENS": "Census",
     "PROB": "Probate", "WILL": "Will", "GRAD": "Graduation", "RETI": "Retirement", "CONF": "Confirmation",
     "FCOM": "First Communion", "ORDN": "Ordination", "RELI": "Religion",
+    "MARR": "Marriage", "DIV": "Divorce", "ENGA": "Engagement", "MARB": "Marriage Banns",
+    "MARS": "Marriage Settlement",
 }
 _PLACE_ID = re.compile(r"^P\d+$")
 _SOURCE_ID = re.compile(r"^S\d+$")
@@ -35,8 +38,10 @@ class Target:
     proposal: Proposal
     reads: dict[str, tuple[str, dict, str]] = field(default_factory=dict)  # key -> (kind, obj, etag) to PUT
     place_handle: str | None = None
+    new_place: str | None = None  # add_event: a place title Gramps does not have yet; the writer creates it
     source_handle: str | None = None
     gramps_date: dict | None = None
+    old_event: tuple[str, dict, str] | None = None  # conflict decided "replace": the event to mark, as (kind, obj, etag)
     child_handle: str | None = None  # link_child: the child has no ETag in reads, the writer reads it fresh
 
 
@@ -120,12 +125,23 @@ class Resolver:
                 return (place.get("profile") or {}).get("name") or None
         return None
 
-    def place_handle(self, value: str) -> str:
+    def forget_places(self) -> None:
+        """Read the places again on next use, after the writer created one."""
+        self._places = None
+
+    def _place_hits(self, value: str) -> list[dict]:
         if _PLACE_ID.match(value):
-            hits = [p for p in self.places if p.get("gramps_id") == value]
-        else:
-            hits = [p for p in self.places if (p.get("profile") or {}).get("name") == value]
-        if len(hits) != 1:
+            return [p for p in self.places if p.get("gramps_id") == value]
+        return [p for p in self.places if (p.get("profile") or {}).get("name") == value]
+
+    def place_handle(self, value: str, creatable: bool = False) -> str | None:
+        """The handle of the place; None when `creatable` and a title matches no place."""
+        hits = self._place_hits(value)
+        if len(hits) > 1:
+            raise ValueError(f"place {value!r} is not unique in Gramps; give its Gramps id")
+        if not hits:
+            if creatable and not _PLACE_ID.match(value):
+                return None
             raise ValueError(f"place {value!r} not in Gramps; add it there or give its Gramps id")
         return hits[0]["handle"]
 
@@ -143,6 +159,14 @@ class Resolver:
         if found is None:
             raise Stale(f"{tree_id} is no longer in Gramps")
         return self.client.get(kind, found["handle"])
+
+    def _has_note(self, owner: dict, text: str) -> bool:
+        """Whether a note on `owner` already says `text` (spacing ignored)."""
+        for handle in owner.get("note_list") or []:
+            note, _ = self.client.get("notes", handle)
+            if same_note((note.get("text") or {}).get("string", ""), text):
+                return True
+        return False
 
     def _events(self, person: dict, gramps_type: str) -> list[tuple[dict, str]]:
         out = []
@@ -169,15 +193,20 @@ class Resolver:
             target.gramps_date = to_gramps_date(date)
         place = pl.get("birth_place") if p.operation == "add_person" else pl.get("place")
         if place and p.operation in ("add_event", "update_event", "add_person"):
-            target.place_handle = self.place_handle(place)
+            target.place_handle = self.place_handle(place, creatable=p.operation == "add_event")
+            if target.place_handle is None:
+                target.new_place = place
         getattr(self, f"_{p.operation}")(p, target, new_people)
+        if p.conflict is not None and p.conflict.decision == "replace":
+            owner = (target.reads.get("person") or target.reads["family"])[1]
+            event, etag = self._anchored_event(owner, p.anchor or {})
+            target.old_event = ("events", event, etag)
         return target
 
-    def _update_event(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
-        person, _ = self._read("people", p.payload["person_id"])
-        anchor = p.anchor or {}
+    def _anchored_event(self, owner: dict, anchor: dict) -> tuple[dict, str]:
+        """The one event of `owner` that looks like the anchor, else Stale naming what Gramps has."""
         tag = anchor.get("type") or ""
-        events = self._events(person, _gramps_type(tag))
+        events = self._events(owner, _gramps_type(tag))
         hits = [(e, etag) for e, etag in events
                 if same_date(e.get("date"), anchor.get("date"))
                 and self._place_title(e.get("place")) == (anchor.get("place") or None)
@@ -188,20 +217,41 @@ class Resolver:
             raise Stale(f"Gramps has {now}, the proposal was made against {was}")
         if len(hits) > 1:
             raise Stale(f"{was} is in Gramps more than once")
-        event, etag = hits[0]
+        return hits[0]
+
+    def _update_event(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
+        person, _ = self._read("people", p.payload["person_id"])
+        event, etag = self._anchored_event(person, p.anchor or {})
         target.reads["event"] = ("events", event, etag)
 
+    def _owner(self, payload: dict) -> tuple[str, str, dict, str]:
+        """(reads key, kind, object, etag) of the person or family an event or note is added to."""
+        if payload.get("family_id"):
+            family, etag = self._read("families", payload["family_id"])
+            return "family", "families", family, etag
+        person, etag = self._read("people", payload["person_id"])
+        return "person", "people", person, etag
+
     def _add_event(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
-        person, etag = self._read("people", p.payload["person_id"])
+        key, kind, owner, etag = self._owner(p.payload)
         tag = p.payload["type"]
-        for event, _ in self._events(person, _gramps_type(tag)):
-            if same_date(event.get("date"), p.payload.get("date")):
-                raise Stale(f"Gramps already has {self._show_event(event)}, the event this proposal adds")
-        target.reads["person"] = ("people", person, etag)
+        note = with_source(p.payload["note"], p.sources) if p.payload.get("note") else None
+        description = event_description(p.payload)
+        for event, _ in self._events(owner, _gramps_type(tag)):
+            if same_date(event.get("date"), p.payload.get("date")) and (
+                    not description or (event.get("description") or "") == description):
+                if note and self._has_note(event, note):
+                    raise Stale(f"already in Gramps: {self._show_event(event)} with this note")
+                if not p.conflict:  # a conflict is the user deciding to add a value that differs from the tree's
+                    raise Stale(f"Gramps already has {self._show_event(event)}, the event this proposal adds")
+        target.reads[key] = (kind, owner, etag)
 
     def _add_note(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
-        person, etag = self._read("people", p.payload["person_id"])
-        target.reads["person"] = ("people", person, etag)
+        key, kind, owner, etag = self._owner(p.payload)
+        if self._has_note(owner, with_source(p.payload["text"], p.sources)):
+            raise Stale(f"already in Gramps: a note on {p.payload.get('person_id') or p.payload['family_id']} "
+                        "with this text")
+        target.reads[key] = (kind, owner, etag)
 
     def _add_source_citation(self, p: Proposal, target: Target, new_people: dict[str, str]) -> None:
         target.source_handle = self.source_handle(p.payload["source"])

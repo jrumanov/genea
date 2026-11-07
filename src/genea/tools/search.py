@@ -11,6 +11,7 @@ from genea.index.embed import EmbeddingError
 from genea.ingest.docs import DOC_EXTS, extract_document
 from genea.ingest.transcript import Segment, format_time
 from genea.text import PREFIX_MIN, match_span, normalize, snippet
+from genea.tools.excluded import excluded_paths
 from genea.tools.family import family_key
 from genea.tools.base import ToolContext, ToolError, parse_person_id, person_id
 from genea.viewer.links import build_link
@@ -59,6 +60,10 @@ def search_documents(ctx: ToolContext, query: str, k: int = 8, per_file: int = 1
     for chunk_id, score in ranked:
         if chunk_id in file_of:  # a vector row without a chunk row is skipped, not a KeyError
             groups.setdefault(file_of[chunk_id], []).append((chunk_id, score))
+    for path in excluded_paths(ctx.conn):
+        row = ctx.conn.execute("SELECT id FROM files WHERE path = ?", (path,)).fetchone()
+        if row:
+            groups.pop(row[0], None)
     also = _fold_families(ctx, groups)
     chosen = [chunks[:per_file] for chunks in list(groups.values())[:k]]
     picked = [hit for chunks in chosen for hit in chunks]
@@ -202,8 +207,10 @@ def read_document(ctx: ToolContext, path: str, page: int | None = None,
         raise ToolError(str(exc)) from exc
     if not full_path.is_file() or full_path.suffix.lower() not in DOC_EXTS:
         raise ToolError(f"Not a readable document: {path} (use search_documents to find documents)")
-    extract = extract_document(full_path)
     rel = ctx.kb.rel(full_path)
+    if rel in excluded_paths(ctx.conn):
+        raise ToolError(f"{rel} is an excluded identity document")
+    extract = extract_document(full_path)
     if extract.segments:
         return _read_transcript(ctx, rel, extract.segments, page, start_s)
     if start_s is not None:
@@ -245,7 +252,9 @@ def find_images(ctx: ToolContext, person: str | None = None, place: str | None =
     sql = ("SELECT i.*, f.path FROM images i JOIN files f ON f.id = i.file_id"
            + (" WHERE " + " AND ".join(where) if where else "")
            + " ORDER BY i.date_taken, f.path LIMIT ?")
-    rows = ctx.conn.execute(sql, [*params, max(1, min(limit, 100))]).fetchall()
+    banned = excluded_paths(ctx.conn)
+    rows = [r for r in ctx.conn.execute(sql, [*params, max(1, min(limit, 100)) + len(banned)])
+            if r["path"] not in banned][:max(1, min(limit, 100))]
     images = [ImageOut(
         file=r["path"], sidecar=r["sidecar_path"], title=r["title"], description=r["description"],
         date_taken=r["date_taken"], keywords=json.loads(r["keywords"]),

@@ -2,6 +2,7 @@ import pytest
 
 from fixtures.fake_gramps import FakeGramps
 from genea.analysis.models import Proposal
+from genea.tools.models import SourceRef
 from genea.gramps.client import GrampsClient
 from genea.gramps.dates import to_gramps_date
 from genea.gramps.resolve import TAG_TO_GRAMPS, Resolver, Stale, gramps_id
@@ -84,9 +85,23 @@ def test_missing_person_is_stale(resolver):
         resolver.resolve(p, {})
 
 
-def test_place_must_exist(resolver):
-    p = proposal("add_event", {"person_id": f"{GED}#@I1@", "type": "DEAT", "date": "1950", "place": "Bratislava"})
+def test_place_must_exist_to_update_an_event(resolver):
+    p = update_birth()
+    p.payload["place"] = "Bratislava"
     with pytest.raises(ValueError, match="not in Gramps"):
+        resolver.resolve(p, {})
+
+
+def test_unknown_place_of_a_new_event_is_new(resolver):
+    p = proposal("add_event", {"person_id": f"{GED}#@I1@", "type": "DEAT", "date": "1950", "place": "Bratislava"})
+    t = resolver.resolve(p, {})
+    assert t.new_place == "Bratislava" and t.place_handle is None
+
+
+def test_ambiguous_place_not_created(resolver, fake):
+    fake.add("places", {"handle": "pl2", "gramps_id": "P2", "profile": {"name": "Brno"}})
+    p = proposal("add_event", {"person_id": f"{GED}#@I1@", "type": "DEAT", "date": "1950", "place": "Brno"})
+    with pytest.raises(ValueError, match="not unique"):
         resolver.resolve(p, {})
 
 
@@ -154,4 +169,14 @@ def test_add_person_other_birth_is_not_duplicate(resolver):
 def test_unrepresentable_date_is_value_error(resolver):
     p = proposal("add_event", {"person_id": f"{GED}#@I1@", "type": "DEAT", "date": "@#DHEBREW@ 5650"})
     with pytest.raises(ValueError):
+        resolver.resolve(p, {})
+
+
+def test_resolve_rerun_note_stale(resolver, fake):
+    p = proposal("add_note", {"person_id": f"{GED}#@I2@", "text": "Mlynár"})
+    p.sources = [SourceRef(file="docs/a.pdf", page=1)]
+    fake.add("notes", {"handle": "n1", "gramps_id": "N1",
+                       "text": {"_class": "StyledText", "string": "Mlynár \n Source:  [docs/a.pdf p.1]"}})
+    fake.objects["people"]["i2"]["note_list"] = ["n1"]
+    with pytest.raises(Stale, match="already in Gramps"):
         resolver.resolve(p, {})

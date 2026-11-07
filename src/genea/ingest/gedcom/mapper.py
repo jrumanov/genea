@@ -13,6 +13,7 @@ INDIVIDUAL_EVENT_TAGS = frozenset({
     "IMMI", "NATU", "CENS", "PROB", "WILL", "GRAD", "RETI", "EVEN", "CONF", "FCOM", "ORDN", "RELI",
 })
 FAMILY_EVENT_TAGS = frozenset({"MARR", "DIV", "ENGA", "MARB", "MARC", "MARL", "ANUL", "EVEN", "CENS", "RESI"})
+FAMILY_WRITE_TAGS = frozenset({"MARR", "DIV", "ENGA", "MARB", "MARS"})  # family events the Gramps writer maps
 GENEA_NOTE = re.compile(r"^GENEA (CHECK )?v\d+ ")  # notes genea writes into iterations; never evidence
 
 

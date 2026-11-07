@@ -8,6 +8,7 @@ import math
 from genea.index.indexer import EXACT, VARIANT, name_forms
 from genea.text import match_span, normalize, snippet
 from genea.tools.base import ToolContext, ToolError, parse_person_id
+from genea.tools.excluded import excluded_paths
 from genea.tools.models import DocumentMentions, Mention, PersonDocuments, SourceRef
 from genea.tools.people import summary
 from genea.viewer.links import build_link
@@ -64,7 +65,10 @@ def documents_about(ctx: ToolContext, person_id: str, page: int = 1) -> PersonDo
         return False
 
     by_file: dict[str, list] = {}
+    banned = excluded_paths(ctx.conn)
     for row in rows:
+        if row["path"] in banned:
+            continue
         by_file.setdefault(row["path"], []).append(row)
     entries = []
     for path, chunks in by_file.items():

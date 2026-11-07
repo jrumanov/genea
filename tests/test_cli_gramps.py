@@ -130,3 +130,15 @@ def test_login_keyring_error_is_clean(cli, fake, monkeypatch):
     assert "login ok, but the password could not be stored: RuntimeError" in result.output
     assert "GENEA_GRAMPS_PASSWORD_ME" in result.output and "secret" not in result.output
     assert "Traceback" not in result.output
+
+
+def test_review_prints_the_pr_and_apply_reads_it(ctx, cli, fake, repo):
+    name = _analysis(ctx)
+    pid = _update(ctx, name, "@I3@", "2 JAN 1878")
+    result = cli("analysis", "review", name)
+    assert result.exit_code == 0, result.output
+    assert PR_URL in result.output and _writes(fake) == []
+    assert store.load(ctx.kb, name).review.pr == PR_URL
+    applied = cli("analysis", "apply", name, "--yes")
+    assert applied.exit_code == 0, applied.output
+    assert store.load(ctx.kb, name).proposals[0].status == "written" and pid in applied.output

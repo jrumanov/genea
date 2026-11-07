@@ -109,6 +109,8 @@ class FakeGramps:
             obj = json.loads(request.content)
             if not obj.get("gramps_id"):  # Gramps Web assigns the next id, like Gramps itself
                 obj["gramps_id"] = f"{KINDS[kind][0]}{len(self.objects[kind]) + 1000:04d}"
+            if kind == "places" and "profile" not in obj:  # Gramps Web derives the profile from the name
+                obj["profile"] = {"name": (obj.get("name") or {}).get("value") or obj.get("title", "")}
             handle = self.add(kind, obj)
             tid = self._record(kind, handle, None, self.objects[kind][handle])
             if self.empty_post_response:

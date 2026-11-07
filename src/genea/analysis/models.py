@@ -51,13 +51,21 @@ class WriteRecord(BaseModel):
     pr: str | None = None
 
 
+class Conflict(BaseModel):
+    """The proposal disagrees with a value the tree already has; the user decides in the review."""
+    line: int  # GEDCOM line of the existing event
+    existing: str  # one line: what the tree says
+    decision: Literal["undecided", "keep", "replace", "both"] = "undecided"
+
+
 class Proposal(BaseModel):
     id: str
     finding_id: str | None = None
     author: Literal["claude", "user"]
     operation: Operation  # a closed list: build calls the builder method of this name
     payload: dict[str, Any]
-    anchor: dict[str, str | None] | None = None  # update_event: the event as it was {type, description, date, place}
+    anchor: dict[str, str | None] | None = None  # update_event, conflicts: the event as it was {type, description, date, place}
+    conflict: Conflict | None = None  # add_event / add_note only
     base_hash: str | None = None  # sha256 of the tree the proposal was made against (None: made before it was kept)
     sources: list[SourceRef]
     rationale: str
@@ -79,6 +87,14 @@ class AnalysisNote(BaseModel):
     text: str
 
 
+class Review(BaseModel):
+    """The PR in the tree repo where the user reviews the bundle before anything is written."""
+    branch: str
+    pr: str
+    file: str  # repo-relative path of the bundle
+    edited: bool = False  # the file was changed in ways apply does not read
+
+
 class Analysis(BaseModel):
     name: str
     scope: ScopeSpec
@@ -95,6 +111,7 @@ class Analysis(BaseModel):
     notes: list[AnalysisNote] = Field(default_factory=list)
     iterations: int = 0
     last_build: LastBuild | None = None
+    review: Review | None = None
 
     def finding_status(self, finding_id: str) -> str:
         if finding_id in self.dismissed:
