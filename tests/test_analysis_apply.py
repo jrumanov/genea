@@ -647,3 +647,15 @@ def test_review_decision_replaces(ctx, fake, run, repo):
     assert _apply(ctx, name, fake, run).written == ["p-1"]
     old = fake.objects["events"]["e" + "I3BIRT"]
     assert len(old["note_list"]) == 1
+
+
+def test_read_review_after_a_first_apply(ctx, fake, run, repo):
+    from genea.analysis.apply import read_review
+
+    name = _analysis(ctx)
+    first = _update(ctx, name, "@I3@", "2 JAN 1878")
+    _open_review(ctx, name, run)
+    read_review(ctx, name, run)
+    assert _apply(ctx, name, fake, run).written == [first]
+    read_review(ctx, name, run)  # the PR file still holds the written item's section
+    assert _proposal(ctx, name, first).status == "written"

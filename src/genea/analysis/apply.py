@@ -274,7 +274,7 @@ def read_review(ctx: ToolContext, name: str, run: Runner = default_runner) -> No
     for p in expected.proposals:
         if p.status == "active" and p.id not in kept:
             p.status = "withdrawn"
-        if p.id in decisions and p.conflict is not None:
+        if p.id in decisions and p.conflict is not None and p.status == "active":
             p.conflict.decision = decisions[p.id]  # type: ignore[assignment]
     for p, q in zip(analysis.proposals, expected.proposals, strict=True):
         p.status = q.status

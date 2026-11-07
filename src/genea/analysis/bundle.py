@@ -64,7 +64,7 @@ def render_bundle(analysis: Analysis) -> str:
 
 def parse_bundle(text: str, analysis: Analysis) -> tuple[set[str], dict[str, str]]:
     """The ids of the items left in the file and the decision written for each conflict."""
-    active = {p.id: p for p in analysis.proposals if p.status == "active"}
+    active = {p.id: p for p in analysis.proposals if p.status != "withdrawn"}  # written ones keep their section
     kept: set[str] = set()
     decisions: dict[str, str] = {}
     current: Proposal | None = None
@@ -76,7 +76,7 @@ def parse_bundle(text: str, analysis: Analysis) -> tuple[set[str], dict[str, str
             if match := _ITEM.match(line):
                 pid = match.group(1)
                 if pid not in active:
-                    raise ToolError(f"line {n}: {pid} is not an active proposal of this analysis.")
+                    raise ToolError(f"line {n}: {pid} is not a proposal of this analysis.")
                 if pid in kept:
                     raise ToolError(f"line {n}: {pid} appears twice.")
                 kept.add(pid)
