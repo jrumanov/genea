@@ -196,6 +196,24 @@ that is stale (its record changed in Gramps) is skipped; one that ended `failed`
 proposal in Gramps Web and opens another PR. `genea snapshot <ged>` opens a PR with the tree as Gramps Web has it,
 for edits you made there by hand.
 
+### Collect everything about a person
+
+Ask Claude (in a session with the genea MCP server and the `collect-person` skill) to "collect everything about
+<person or family> into Gramps". Claude reads every document that names them, compares each fact with the tree
+and proposes only what is missing: events (with a note ending in its source), residences (`Address: ...`,
+dated when known), and notes (each ending in its source). A fact that differs from the tree is proposed as a
+conflict. Facts about other people become one `Leads:` note on the chosen person. Nothing is written yet.
+
+1. Claude ends with `genea analysis review <name>`, which opens a PR in the tree repo holding
+   `genea-review/<name>.md` and the iteration diff.
+2. Edit the PR: delete an item's section to drop it, and set `decision:` to `keep`, `replace` or `both` on every
+   conflict (`replace` adds the new value and marks the old event with a note; nothing is deleted).
+3. `genea analysis apply <name>` reads the PR's final state, shows the preview, writes to Gramps Web and pushes
+   the before/after snapshots onto the same PR. A bundle with an undecided conflict is refused.
+
+A family produces one PR per member and one for the family; merge the family PR last. Identity documents (travel
+card, resident permit, id card, driving license, health insurance card) are never shown by any tool.
+
 ## DNA (MyHeritage raw data)
 
 genea can read a MyHeritage raw DNA download (`MyHeritage_raw_dna_data.csv`, build 37) for one person of the tree
