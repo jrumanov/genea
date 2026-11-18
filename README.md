@@ -326,7 +326,7 @@ A PDF with no text layer (every page a photo or scan) is indexed as `needs_ocr` 
 `genea render-pdf <pdf> <folder outside the knowledge base>` (needs `uv sync --extra scan`), then ask Claude Code
 to extract it with the `extract-generic-document` skill. It reads the page images (handwriting included) and
 writes `<pdf name>.md` beside the PDF, one `### Page N` section per page, flagged `Review status: NOT REVIEWED`.
-After the next `genea index` the text is searchable, and `genea status` no longer lists the PDF as a problem.
+`genea status` stops listing the PDF as a problem as soon as the `.md` exists; the text becomes searchable after the next `genea index`.
 
 ## Privacy
 
