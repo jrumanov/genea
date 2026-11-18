@@ -29,3 +29,33 @@ def unread_scans(kb: KnowledgeBase) -> list[str]:
         return []
     finally:
         conn.close()
+
+
+class ScanError(Exception):
+    """A PDF that cannot be rendered (damaged, password-protected) or a missing renderer."""
+
+
+def render_pages(pdf: Path, out_dir: Path, dpi: int = 200) -> list[Path]:
+    """Render each page of `pdf` to `out_dir/page-001.png`, ... one page at a time; returns the files in order."""
+    try:
+        import pypdfium2
+    except ImportError as exc:
+        raise ScanError("pypdfium2 is not installed: run `uv sync --extra scan`") from exc
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    try:
+        document = pypdfium2.PdfDocument(str(pdf))
+        try:
+            for number in range(len(document)):
+                page = document[number]
+                try:
+                    path = out_dir / f"page-{number + 1:03d}.png"
+                    page.render(scale=dpi / 72).to_pil().save(path)
+                    paths.append(path)
+                finally:
+                    page.close()
+        finally:
+            document.close()
+    except pypdfium2.PdfiumError as exc:
+        raise ScanError(f"cannot read {pdf.name}: {exc}") from exc
+    return paths
