@@ -5,6 +5,8 @@ description: Use when the user asks to extract, transcribe or write an MD file f
 
 # Extract the tagged people from a census sheet
 
+PDF without a text layer: render its pages first with `genea render-pdf` (see "PDF input" in `extract-generic-document`) and read the page images.
+
 A census sheet (house sheet) lists everyone living in one house. The MD file covers ONLY the people
 tagged on the image, plus the house header and the census date. Everyone else on the sheet is out of scope.
 The writing is usually Slovak handwriting (older sheets can be Czech, Hungarian or German).

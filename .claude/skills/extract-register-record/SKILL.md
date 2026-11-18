@@ -5,6 +5,8 @@ description: Use when the user asks to extract, transcribe or write an MD file f
 
 # Extract one person's record from a register page
 
+PDF without a text layer: render its pages first with `genea render-pdf` (see "PDF input" in `extract-generic-document`) and read the page images.
+
 A register page (church or civil book) holds many entries. The MD file is about ONE person (or one
 couple), and the file name says who. Everything else on the page is out of scope.
 
