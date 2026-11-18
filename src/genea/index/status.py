@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from genea.index.db import connect_readonly
 from genea.index.progress import IndexProgress, IndexState, index_state, read_progress
+from genea.ingest.scans import sibling_md
 from genea.kb import KnowledgeBase
 
 
@@ -42,7 +43,8 @@ def index_summary(kb: KnowledgeBase) -> IndexSummary:
         summary.counts = [(r["kind"], r["status"], r["n"]) for r in conn.execute(
             "SELECT kind, status, COUNT(*) AS n FROM files GROUP BY kind, status ORDER BY kind, status")]
         summary.problems = [(r["path"], r["status"], r["error_msg"] or "") for r in conn.execute(
-            "SELECT path, status, error_msg FROM files WHERE status != 'ok' OR error_msg IS NOT NULL ORDER BY path")]
+            "SELECT path, status, error_msg FROM files WHERE status != 'ok' OR error_msg IS NOT NULL ORDER BY path")
+            if not (r["status"] == "needs_ocr" and sibling_md(kb.root / r["path"]).exists())]  # read through its md
         summary.people = conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
     except sqlite3.Error:  # a run is creating the schema or holds a write lock: report what we know
         summary.counts, summary.problems, summary.people = None, [], None

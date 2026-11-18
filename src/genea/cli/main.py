@@ -14,6 +14,7 @@ from genea.cli import (  # noqa: E402,F401
     kbcmds,
     mcpcmds,
     querycmds,
+    scancmds,
     summarycmds,
     transcribecmds,
 )

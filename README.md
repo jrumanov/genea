@@ -127,6 +127,7 @@ variable works too.
 | `genea transcribe-model convert <hf-repo\|folder\|sk-small\|sk-medium\|sk-large-v3-turbo> [--name N] [--force]` | Convert a Hugging Face Whisper checkpoint to a whisper.cpp model, e.g. the Slovak fine-tunes |
 | `genea transcripts check [path]` | List transcripts where Whisper looped or stopped early (exit code 1 if any) |
 | `genea transcripts repair <transcript> [--from S] [--model M] [--language L] [--no-splice]` | Re-transcribe the lost part from the audio and splice it in |
+| `genea scans` / `render-pdf <pdf> <out dir> [--dpi N]` | List scanned PDFs without an md, and render a PDF's pages to PNG so they can be read (see "Scanned PDFs") |
 | `genea changes list / show / apply / reject / undo / export` | Review what the agent proposed |
 
 ## How changes work
@@ -318,6 +319,15 @@ for which the fine-tune hears nothing or loops is left out, and a segment whose 
 length from the first pass is kept but listed as `check:` in the output. It is slower than a single pass; how much
 slower has not been measured yet. Speaker labels are not produced: Whisper does not tell speakers apart.
 
+## Scanned PDFs
+
+A PDF with no text layer (every page a photo or scan) is indexed as `needs_ocr` and is not searchable.
+`genea scans` lists the ones that still have no `.md` next to them. Render a PDF's pages with
+`genea render-pdf <pdf> <folder outside the knowledge base>` (needs `uv sync --extra scan`), then ask Claude Code
+to extract it with the `extract-generic-document` skill. It reads the page images (handwriting included) and
+writes `<pdf name>.md` beside the PDF, one `### Page N` section per page, flagged `Review status: NOT REVIEWED`.
+`genea status` stops listing the PDF as a problem as soon as the `.md` exists; the text becomes searchable after the next `genea index`.
+
 ## Privacy
 
 With an `ollama:` model, nothing leaves your computer. With a cloud model, your questions and the
@@ -333,7 +343,7 @@ Novák" and found nothing. Compare other models with `GENEA_LIVE_MODEL=ollama:<n
 
 ## Limitations (v1)
 
-No OCR (scanned PDFs are listed as `needs_ocr` by `genea status`), no image-content analysis, and
+No local OCR (scanned PDFs without a text layer are read through Claude vision, see "Scanned PDFs"), no image-content analysis, and
 no direct GEDCOM writing. Name matching does not handle Czech declension ("Annou Svobodovou"),
 so full-text and semantic search do that work.
 
