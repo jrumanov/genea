@@ -41,9 +41,9 @@ def render_pages(pdf: Path, out_dir: Path, dpi: int = 200) -> list[Path]:
         import pypdfium2
     except ImportError as exc:
         raise ScanError("pypdfium2 is not installed: run `uv sync --extra scan`") from exc
-    out_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
     try:
+        out_dir.mkdir(parents=True, exist_ok=True)
         document = pypdfium2.PdfDocument(str(pdf))
         try:
             for number in range(len(document)):
@@ -58,4 +58,9 @@ def render_pages(pdf: Path, out_dir: Path, dpi: int = 200) -> list[Path]:
             document.close()
     except pypdfium2.PdfiumError as exc:
         raise ScanError(f"cannot read {pdf.name}: {exc}") from exc
+    except (OSError, MemoryError) as exc:
+        raise ScanError(f"cannot write the pages to {out_dir}: {exc}") from exc
+    for old in out_dir.glob("page-*.png"):  # pages of an earlier, longer render must not pass for this PDF's
+        if old not in paths:
+            old.unlink()
     return paths

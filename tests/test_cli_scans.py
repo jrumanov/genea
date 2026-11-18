@@ -64,3 +64,18 @@ def test_render_pdf_damaged_exit_1_no_traceback(kb, tmp_path):
     result = runner.invoke(app, ["--kb", str(kb.root), "render-pdf", str(bad), str(tmp_path / "o")])
     assert result.exit_code == 1
     assert "Traceback" not in result.output
+
+
+def test_render_pdf_out_dir_is_a_file_exit_1_no_traceback(kb, tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x", encoding="utf-8")
+    result = runner.invoke(app, ["--kb", str(kb.root), "render-pdf", str(kb.root / "docs" / "sken.pdf"), str(blocker)])
+    assert result.exit_code == 1
+    assert "cannot write" in result.output
+
+
+def test_render_pdf_bad_dpi_exit_2(kb, tmp_path):
+    for dpi in ("0", "-5", "100000"):
+        result = runner.invoke(app, ["--kb", str(kb.root), "render-pdf", str(kb.root / "docs" / "sken.pdf"),
+                                     str(tmp_path / "o"), "--dpi", dpi])
+        assert result.exit_code == 2, dpi

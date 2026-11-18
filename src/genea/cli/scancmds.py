@@ -32,7 +32,7 @@ def scans(ctx: typer.Context) -> None:
 def render_pdf(
     pdf: Path = typer.Argument(..., help="The PDF to render."),
     out_dir: Path = typer.Argument(..., help="Folder for page-001.png, page-002.png, ... (not the knowledge base)."),
-    dpi: int = typer.Option(200, "--dpi", help="Resolution of the page images."),
+    dpi: int = typer.Option(200, "--dpi", min=36, max=600, help="Resolution of the page images."),
 ) -> None:
     """Render the pages of a PDF to PNG files so they can be read with vision."""
     if pdf.suffix.lower() != ".pdf" or not pdf.is_file():

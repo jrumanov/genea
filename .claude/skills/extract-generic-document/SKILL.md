@@ -12,7 +12,8 @@ pages and census sheets have their own skills (`extract-register-record`, `extra
 
 Find waiting PDFs with `genea scans`. A PDF page is not an image the Read tool can show at full
 resolution, so render it first: `genea render-pdf <pdf> <folder in the scratchpad>` writes `page-001.png`,
-`page-002.png`, ... Read every page image (step 1 below applies), then write ONE `<pdf stem>.md` next to
+`page-002.png`, ... Use one fresh folder per PDF (`<scratchpad>/<pdf stem>/`) and read only the paths the
+command printed. Read every page image (step 1 below applies), then write ONE `<pdf stem>.md` next to
 the PDF with the pages in order under `### Page N`. Write nothing else into the knowledge base. One
 worker per PDF (a few short PDFs per worker at most).
 
