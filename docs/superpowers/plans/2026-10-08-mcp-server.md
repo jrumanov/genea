@@ -763,7 +763,7 @@ Claude Desktop (`claude_desktop_config.json`; use absolute paths, and double bac
   "mcpServers": {
     "genea": {
       "command": "uv",
-      "args": ["run", "--directory", "C:\\path\\to\\genealogy-rag", "--extra", "mcp", "genea", "--kb", "C:\\path\\to\\kb", "mcp"]
+      "args": ["run", "--directory", "C:\\path\\to\\genea", "--extra", "mcp", "genea", "--kb", "C:\\path\\to\\kb", "mcp"]
     }
   }
 }
